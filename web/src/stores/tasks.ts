@@ -16,6 +16,7 @@ export interface ScheduledTask {
   last_result?: string | null;
   status: 'active' | 'paused' | 'completed';
   created_at: string;
+  notify_channels?: string[] | null;
 }
 
 export interface TaskRunLog {
@@ -43,8 +44,10 @@ interface TasksState {
     contextMode: 'group' | 'isolated',
     executionType?: 'agent' | 'script',
     scriptCommand?: string,
+    notifyChannels?: string[] | null,
   ) => Promise<void>;
   updateTaskStatus: (id: string, status: 'active' | 'paused') => Promise<void>;
+  updateTask: (id: string, fields: Record<string, unknown>) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
   loadLogs: (taskId: string) => Promise<void>;
   runTaskNow: (id: string) => Promise<void>;
@@ -84,6 +87,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     contextMode: 'group' | 'isolated',
     executionType?: 'agent' | 'script',
     scriptCommand?: string,
+    notifyChannels?: string[] | null,
   ) => {
     try {
       const normalizedScheduleValue =
@@ -105,6 +109,9 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       if (scriptCommand) {
         body.script_command = scriptCommand;
       }
+      if (notifyChannels !== undefined) {
+        body.notify_channels = notifyChannels;
+      }
       await api.post('/api/tasks', body);
       set({ error: null });
       await get().loadTasks();
@@ -116,6 +123,16 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   updateTaskStatus: async (id: string, status: 'active' | 'paused') => {
     try {
       await api.patch(`/api/tasks/${id}`, { status });
+      set({ error: null });
+      await get().loadTasks();
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
+  updateTask: async (id: string, fields: Record<string, unknown>) => {
+    try {
+      await api.patch(`/api/tasks/${id}`, fields);
       set({ error: null });
       await get().loadTasks();
     } catch (err) {
@@ -149,8 +166,9 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     try {
       await api.post(`/api/tasks/${id}/run`);
       set({ error: null });
-      // Refresh after a short delay (task runs in background)
-      setTimeout(() => get().loadTasks(), 2000);
+      // Refresh task list and logs after delays to catch fast and slow tasks
+      setTimeout(() => { get().loadTasks(); get().loadLogs(id); }, 8000);
+      setTimeout(() => { get().loadTasks(); get().loadLogs(id); }, 20000);
     } catch (err) {
       set({ error: err instanceof Error ? err.message : String(err) });
     }

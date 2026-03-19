@@ -3082,6 +3082,7 @@ function startIpcWatcher(): void {
     sourceFolder: string,
     alreadySentJids: Set<string>,
     sendFn: (jid: string) => void,
+    notifyChannels?: string[] | null,
   ): void {
     const sentChannelTypes = new Set<string>();
     for (const jid of alreadySentJids) {
@@ -3092,6 +3093,8 @@ function startIpcWatcher(): void {
     const ownerGroups = getGroupsByOwner(userId);
     for (const channelType of connectedTypes) {
       if (sentChannelTypes.has(channelType)) continue;
+      // Filter by notify_channels if specified (null = all channels)
+      if (notifyChannels && !notifyChannels.includes(channelType)) continue;
       const target =
         ownerGroups.find(
           (g) =>
@@ -3134,8 +3137,8 @@ function startIpcWatcher(): void {
       // Collect all IPC roots: main group dir + agents/*/ + tasks-run/*/
       // Tag agent roots with their agentId so we can route messages to virtual JIDs.
       const groupIpcRoot = path.join(ipcBaseDir, sourceGroup);
-      const ipcRoots: Array<{ path: string; agentId: string | null }> = [
-        { path: groupIpcRoot, agentId: null },
+      const ipcRoots: Array<{ path: string; agentId: string | null; taskId: string | null }> = [
+        { path: groupIpcRoot, agentId: null, taskId: null },
       ];
       try {
         const agentsDir = path.join(groupIpcRoot, 'agents');
@@ -3147,6 +3150,7 @@ function startIpcWatcher(): void {
             ipcRoots.push({
               path: path.join(agentsDir, entry.name),
               agentId: entry.name,
+              taskId: null,
             });
           }
         }
@@ -3163,6 +3167,7 @@ function startIpcWatcher(): void {
             ipcRoots.push({
               path: path.join(tasksRunDir, entry.name),
               agentId: null,
+              taskId: entry.name,
             });
           }
         }
@@ -3170,7 +3175,7 @@ function startIpcWatcher(): void {
         /* tasks-run dir may not exist */
       }
 
-      for (const { path: ipcRoot, agentId: ipcAgentId } of ipcRoots) {
+      for (const { path: ipcRoot, agentId: ipcAgentId, taskId: ipcTaskId } of ipcRoots) {
         const messagesDir = path.join(ipcRoot, 'messages');
         const tasksDir = path.join(ipcRoot, 'tasks');
 
@@ -3233,12 +3238,19 @@ function startIpcWatcher(): void {
                         data.text,
                         sourceGroup,
                       );
+                      // Resolve notify_channels from the task
+                      let taskNotifyChannels: string[] | null | undefined;
+                      if (ipcTaskId) {
+                        const taskRecord = getTaskById(ipcTaskId);
+                        taskNotifyChannels = taskRecord?.notify_channels;
+                      }
                       broadcastToOwnerIMChannels(
                         sourceGroupEntry.created_by,
                         sourceGroup,
                         alreadySent,
                         (jid) =>
                           sendImWithFailTracking(jid, data.text, taskLocalImages),
+                        taskNotifyChannels,
                       );
                     }
                   }
@@ -3334,6 +3346,11 @@ function startIpcWatcher(): void {
                       const alreadySent = new Set<string>(
                         [data.chatJid, imgImRoute].filter(Boolean) as string[],
                       );
+                      let imgTaskNotifyChannels: string[] | null | undefined;
+                      if (ipcTaskId) {
+                        const imgTaskRecord = getTaskById(ipcTaskId);
+                        imgTaskNotifyChannels = imgTaskRecord?.notify_channels;
+                      }
                       broadcastToOwnerIMChannels(
                         sourceGroupEntry.created_by,
                         sourceGroup,
@@ -3347,6 +3364,7 @@ function startIpcWatcher(): void {
                                 'Failed to broadcast task image to IM',
                               ),
                             ),
+                        imgTaskNotifyChannels,
                       );
                     }
 

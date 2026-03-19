@@ -123,6 +123,7 @@ export interface ScheduledTask {
   status: 'active' | 'paused' | 'completed';
   created_at: string;
   created_by?: string;
+  notify_channels?: string[] | null;
 }
 
 export interface TaskRunLog {
