@@ -266,6 +266,7 @@ class IpcWatcherManager {
   private watchers = new Map<string, fs.FSWatcher[]>();
   private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private processingFolders = new Set<string>();
+  private pendingReprocess = new Set<string>();
   private fallbackTimer: ReturnType<typeof setInterval> | null = null;
   private processGroupFn: ((folder: string) => Promise<void>) | null = null;
   private processFullFn: (() => Promise<void>) | null = null;
@@ -328,12 +329,22 @@ class IpcWatcherManager {
     if (existing) clearTimeout(existing);
     this.debounceTimers.set(folder, setTimeout(() => {
       this.debounceTimers.delete(folder);
-      // Skip if a previous processGroupIpc call for this folder is still running
-      if (this.processingFolders.has(folder)) return;
+      // Skip if a previous processGroupIpc call for this folder is still running;
+      // the pending flag ensures we re-process after the current run finishes.
+      if (this.processingFolders.has(folder)) {
+        this.pendingReprocess.add(folder);
+        return;
+      }
       this.processingFolders.add(folder);
       this.processGroupFn?.(folder)
         .catch((err) => { logger.error({ err, folder }, 'Error processing IPC for group'); })
-        .finally(() => { this.processingFolders.delete(folder); });
+        .finally(() => {
+          this.processingFolders.delete(folder);
+          // Files may have arrived during processing — run once more
+          if (this.pendingReprocess.delete(folder) && this.watchers.has(folder)) {
+            this.debouncedProcess(folder);
+          }
+        });
     }, 100));
   }
 
@@ -3785,10 +3796,10 @@ function startIpcWatcher(): void {
     logger.error({ err }, 'Error in initial IPC scan');
   });
 
-  // Start fallback polling (10s instead of 1s)
+  // Start fallback polling (5s instead of 1s)
   ipcWatcherManager.startFallback();
 
-  logger.info('IPC watcher started (event-driven + 10s fallback)');
+  logger.info('IPC watcher started (event-driven + 5s fallback)');
 }
 
 async function processTaskIpc(

@@ -458,13 +458,16 @@ export class StreamEventProcessor {
       }
     }
 
-    // Accumulate generic tool input JSON for toolInputSummary
+    // Accumulate generic tool input JSON for toolInputSummary.
+    // Only attempt JSON.parse when the accumulated string looks complete (ends with '}')
+    // to avoid O(n^2) repeated parse failures on large tool inputs.
     const pendingGeneric = this.pendingGenericInput.get(blockIndex);
     if (pendingGeneric && !pendingGeneric.resolved) {
       pendingGeneric.inputJson += partialJson;
-      const summary = summarizeToolInput((() => {
+      const trimmed = pendingGeneric.inputJson.trimEnd();
+      const summary = trimmed.endsWith('}') ? summarizeToolInput((() => {
         try { return JSON.parse(pendingGeneric.inputJson); } catch { return null; }
-      })());
+      })()) : undefined;
       if (summary) {
         pendingGeneric.resolved = true;
         this.pendingGenericInput.delete(blockIndex);

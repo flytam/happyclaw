@@ -22,8 +22,6 @@ export const MAIN_GROUP_FOLDER = 'main';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'happyclaw-agent:latest';
-export const IPC_POLL_INTERVAL = 1000;
-
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =

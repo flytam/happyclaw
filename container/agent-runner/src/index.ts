@@ -682,7 +682,17 @@ function drainIpcInput(): IpcDrainResult {
 function createIpcWatcher(onFileDetected: () => void): { close: () => void } {
   let watcher: fs.FSWatcher | null = null;
   let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
+
+  const debouncedDetect = () => {
+    if (closed) return;
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      if (!closed) onFileDetected();
+    }, 50);
+  };
 
   // Ensure IPC_INPUT_DIR exists
   try { fs.mkdirSync(IPC_INPUT_DIR, { recursive: true }); } catch {}
@@ -691,15 +701,15 @@ function createIpcWatcher(onFileDetected: () => void): { close: () => void } {
     // Listen to all event types — 'rename' covers atomic writes on Linux,
     // but Docker bind mounts (macOS virtiofs) may emit 'change' instead.
     watcher = fs.watch(IPC_INPUT_DIR, () => {
-      if (!closed) onFileDetected();
+      debouncedDetect();
     });
     watcher.on('error', (err) => {
-      log(`IPC watcher error: ${err.message}, falling back to polling`);
+      log(`IPC watcher error: ${err.message}, degrading to ${IPC_FALLBACK_POLL_MS}ms fallback polling`);
       watcher?.close();
       watcher = null;
     });
   } catch (err) {
-    log(`Failed to create IPC watcher: ${err instanceof Error ? err.message : String(err)}, using polling`);
+    log(`Failed to create IPC watcher: ${err instanceof Error ? err.message : String(err)}, using fallback polling`);
   }
 
   // Fallback polling for reliability
@@ -712,6 +722,7 @@ function createIpcWatcher(onFileDetected: () => void): { close: () => void } {
       closed = true;
       watcher?.close();
       watcher = null;
+      if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
       if (fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null; }
     },
   };
