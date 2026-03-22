@@ -3722,7 +3722,8 @@ function startIpcWatcher(): void {
               entry.isFile() &&
               entry.name.endsWith('.json') &&
               (entry.name.startsWith('install_skill_result_') ||
-                entry.name.startsWith('uninstall_skill_result_'))
+                entry.name.startsWith('uninstall_skill_result_') ||
+                entry.name.startsWith('list_tasks_result_'))
             ) {
               try {
                 const filePath = path.join(tasksDir, entry.name);
@@ -3746,7 +3747,8 @@ function startIpcWatcher(): void {
                 entry.isFile() &&
                 entry.name.endsWith('.json') &&
                 !entry.name.startsWith('install_skill_result_') &&
-                !entry.name.startsWith('uninstall_skill_result_'),
+                !entry.name.startsWith('uninstall_skill_result_') &&
+                !entry.name.startsWith('list_tasks_result_'),
             )
             .map((entry) => entry.name);
           for (const file of taskFiles) {
@@ -3860,6 +3862,8 @@ async function processTaskIpc(
     // For send_file
     filePath?: string;
     fileName?: string;
+    // For list_tasks
+    isAdminHome?: boolean;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isAdminHome: boolean, // Whether source is admin home container
@@ -4030,6 +4034,69 @@ async function processTaskIpc(
           logger.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task cancel attempt',
+          );
+        }
+      }
+      break;
+
+    case 'list_tasks':
+      if (data.requestId) {
+        const requestId = data.requestId;
+        if (!SAFE_REQUEST_ID_RE.test(requestId)) {
+          logger.warn(
+            { sourceGroup, requestId },
+            'Rejected list_tasks request with invalid requestId',
+          );
+          break;
+        }
+        const listTasksDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'tasks');
+        const listTasksDirResolved = path.resolve(listTasksDir);
+        const resultFileName = `list_tasks_result_${requestId}.json`;
+        const resultFilePath = path.resolve(listTasksDir, resultFileName);
+        if (!resultFilePath.startsWith(`${listTasksDirResolved}${path.sep}`)) {
+          logger.warn(
+            { sourceGroup, requestId, resultFilePath },
+            'Rejected list_tasks request with unsafe result file path',
+          );
+          break;
+        }
+
+        try {
+          const allTasks = getAllTasks();
+          // Admin home sees all tasks, others only see their own group's tasks
+          const filteredTasks = isAdminHome
+            ? allTasks
+            : allTasks.filter((t) => t.group_folder === sourceGroup);
+          const taskList = filteredTasks.map((t) => ({
+            id: t.id,
+            groupFolder: t.group_folder,
+            prompt: t.prompt,
+            schedule_type: t.schedule_type,
+            schedule_value: t.schedule_value,
+            status: t.status,
+            next_run: t.next_run,
+          }));
+          const resultData = JSON.stringify({ success: true, tasks: taskList });
+          const tmpPath = `${resultFilePath}.tmp`;
+          fs.mkdirSync(path.dirname(resultFilePath), { recursive: true });
+          fs.writeFileSync(tmpPath, resultData);
+          fs.renameSync(tmpPath, resultFilePath);
+          logger.debug(
+            { sourceGroup, taskCount: taskList.length },
+            'Task list sent via IPC',
+          );
+        } catch (err) {
+          const errorResult = JSON.stringify({
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          const tmpPath = `${resultFilePath}.tmp`;
+          fs.mkdirSync(path.dirname(resultFilePath), { recursive: true });
+          fs.writeFileSync(tmpPath, errorResult);
+          fs.renameSync(tmpPath, resultFilePath);
+          logger.error(
+            { sourceGroup, err },
+            'Failed to list tasks via IPC',
           );
         }
       }

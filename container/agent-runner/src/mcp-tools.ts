@@ -568,57 +568,82 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       "List all scheduled tasks. From admin home: shows all tasks. From other groups: shows only that group's tasks.",
       {},
       async () => {
-        const tasksFile = path.join(ctx.workspaceIpc, 'current_tasks.json');
-        try {
-          if (!fs.existsSync(tasksFile)) {
-            return {
-              content: [
-                { type: 'text' as const, text: 'No scheduled tasks found.' },
-              ],
-            };
+        const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const resultFileName = `list_tasks_result_${requestId}.json`;
+        const resultFilePath = path.join(TASKS_DIR, resultFileName);
+
+        const data = {
+          type: 'list_tasks',
+          requestId,
+          groupFolder: ctx.groupFolder,
+          isAdminHome: hasCrossGroupAccess,
+          timestamp: new Date().toISOString(),
+        };
+        writeIpcFile(TASKS_DIR, data);
+
+        // Poll for result file (timeout 30s)
+        const timeout = 30_000;
+        const pollInterval = 500;
+        const deadline = Date.now() + timeout;
+
+        while (Date.now() < deadline) {
+          try {
+            if (fs.existsSync(resultFilePath)) {
+              const raw = fs.readFileSync(resultFilePath, 'utf-8');
+              fs.unlinkSync(resultFilePath);
+              const result = JSON.parse(raw);
+              if (!result.success) {
+                return {
+                  content: [
+                    {
+                      type: 'text' as const,
+                      text: `Error listing tasks: ${result.error || 'Unknown error'}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+              const tasks = result.tasks || [];
+              if (tasks.length === 0) {
+                return {
+                  content: [
+                    { type: 'text' as const, text: 'No scheduled tasks found.' },
+                  ],
+                };
+              }
+              const formatted = tasks
+                .map(
+                  (t: {
+                    id: string;
+                    prompt: string;
+                    schedule_type: string;
+                    schedule_value: string;
+                    status: string;
+                    next_run: string;
+                  }) =>
+                    `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
+                )
+                .join('\n');
+              return {
+                content: [
+                  { type: 'text' as const, text: `Scheduled tasks:\n${formatted}` },
+                ],
+              };
+            }
+          } catch {
+            // ignore read errors, retry
           }
-          const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
-          const tasks = hasCrossGroupAccess
-            ? allTasks
-            : allTasks.filter(
-                (t: { groupFolder: string }) =>
-                  t.groupFolder === ctx.groupFolder,
-              );
-          if (tasks.length === 0) {
-            return {
-              content: [
-                { type: 'text' as const, text: 'No scheduled tasks found.' },
-              ],
-            };
-          }
-          const formatted = tasks
-            .map(
-              (t: {
-                id: string;
-                prompt: string;
-                schedule_type: string;
-                schedule_value: string;
-                status: string;
-                next_run: string;
-              }) =>
-                `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
-            )
-            .join('\n');
-          return {
-            content: [
-              { type: 'text' as const, text: `Scheduled tasks:\n${formatted}` },
-            ],
-          };
-        } catch (err) {
-          return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}`,
-              },
-            ],
-          };
+          await new Promise((resolve) => setTimeout(resolve, pollInterval));
         }
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'Timeout waiting for task list response.',
+            },
+          ],
+          isError: true,
+        };
       },
     ),
 
