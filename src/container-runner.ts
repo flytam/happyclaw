@@ -130,7 +130,8 @@ export interface ContainerOutput {
     | 'interrupt_partial'
     | 'overflow_partial'
     | 'compact_partial'
-    | 'legacy';
+    | 'legacy'
+    | 'auto_continue';
   finalizationReason?: 'completed' | 'interrupted' | 'error';
 }
 

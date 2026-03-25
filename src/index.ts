@@ -146,6 +146,7 @@ import {
 import { logger } from './logger.js';
 import {
   ensureAgentDirectories,
+  isSystemMaintenanceNoise,
   stripAgentInternalTags,
   stripVirtualJidSuffix,
 } from './utils.js';
@@ -1609,7 +1610,7 @@ interface SendMessageOptions {
     turnId?: string;
     sessionId?: string;
     sdkMessageUuid?: string;
-    sourceKind?: 'sdk_final' | 'sdk_send_message' | 'interrupt_partial' | 'overflow_partial' | 'compact_partial' | 'legacy';
+    sourceKind?: 'sdk_final' | 'sdk_send_message' | 'interrupt_partial' | 'overflow_partial' | 'compact_partial' | 'legacy' | 'auto_continue';
     finalizationReason?: 'completed' | 'interrupted' | 'error';
   };
 }
@@ -2595,6 +2596,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           let text = stripAgentInternalTags(raw);
           if (result.sourceKind === 'overflow_partial' || result.sourceKind === 'compact_partial') {
             text = buildOverflowPartialReply(text);
+          }
+          // auto_continue outputs that consist solely of system-maintenance
+          // acknowledgements (e.g. "OK", "已更新 CLAUDE.md") are suppressed from
+          // IM delivery. These arise when the agent's session transcript contains
+          // memory-flush / CLAUDE.md-update context from the compaction pipeline
+          // and the agent echoes it back in the resumption query. Substantive
+          // user-facing continuations (longer replies or actual task resumption)
+          // pass through normally. See issue #275.
+          if (result.sourceKind === 'auto_continue' && isSystemMaintenanceNoise(text)) {
+            logger.info(
+              { group: group.name, textLen: text.length },
+              'auto_continue output suppressed (system maintenance noise)',
+            );
+            return;
           }
           logger.info(
             { group: group.name },
@@ -4850,6 +4865,16 @@ async function processAgentConversation(
         if (agent.kind !== 'spawn') {
           text = buildOverflowPartialReply(text);
         }
+      }
+      // Suppress system-maintenance noise from auto_continue outputs (issue #275).
+      // Short acknowledgements ("OK", "已更新 CLAUDE.md") that leak from the
+      // compaction pipeline are dropped; substantive continuations pass through.
+      if (output.sourceKind === 'auto_continue' && isSystemMaintenanceNoise(text)) {
+        logger.info(
+          { chatJid, agentId, textLen: text.length },
+          'auto_continue output suppressed (system maintenance noise)',
+        );
+        return;
       }
       if (text) {
         const isFirstReply = !lastAgentReplyMsgId;
