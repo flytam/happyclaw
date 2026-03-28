@@ -36,11 +36,11 @@ export function TaskCard({
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active':
-        return 'bg-green-100 text-green-600';
+        return 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400';
       case 'parsing':
-        return 'bg-blue-100 text-blue-600';
+        return 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400';
       case 'paused':
-        return 'bg-amber-100 text-amber-600';
+        return 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400';
       case 'completed':
         return 'bg-muted text-muted-foreground';
       default:
@@ -164,7 +164,7 @@ export function TaskCard({
                 <button
                   onClick={handleRunNow}
                   disabled={runningNow}
-                  className="p-2 text-muted-foreground hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                  className="p-2 text-muted-foreground hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
                   title="立即运行"
                   aria-label="立即运行任务"
                 >
@@ -193,7 +193,7 @@ export function TaskCard({
             {/* Delete */}
             <button
               onClick={handleDelete}
-              className="p-2 text-muted-foreground hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+              className="p-2 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors cursor-pointer"
               title="删除"
               aria-label="删除任务"
             >

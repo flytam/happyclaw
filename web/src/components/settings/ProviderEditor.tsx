@@ -494,7 +494,7 @@ export function ProviderEditor({
                     </Button>
                   ) : (
                     <div className="space-y-2">
-                      <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                      <div className="text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2">
                         授权窗口已打开，请在 claude.ai 完成授权后，将页面上显示的授权码粘贴到下方。
                       </div>
                       <div className="flex gap-2">
