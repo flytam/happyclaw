@@ -29,6 +29,13 @@ export function ConnectionBanner() {
       }
       toast.success('已恢复连接', { duration: 2000 });
     }
+
+    return () => {
+      if (offlineToastId.current) {
+        toast.dismiss(offlineToastId.current);
+        offlineToastId.current = undefined;
+      }
+    };
   }, [status]);
 
   return null;

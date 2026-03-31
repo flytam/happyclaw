@@ -42,7 +42,6 @@ export function ChatPage() {
 
   // Sync URL param to store selection. No auto-redirect to home container —
   // users land on the welcome screen and choose a container manually.
-  const loadGroups = useChatStore((s) => s.loadGroups);
   useEffect(() => {
     if (!groupFolder) return;
     if (routeGroupJid && currentGroup !== routeGroupJid) {

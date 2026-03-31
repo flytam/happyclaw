@@ -21,14 +21,10 @@ export function NavRail() {
   return (
     <TooltipProvider delayDuration={200}>
       <nav className="w-16 h-full bg-muted/30 flex flex-col items-center py-4 gap-2">
-        {/* Logo — click to expand sidebar */}
-        <button
-          onClick={() => {}}
-          className="w-10 h-10 rounded-xl overflow-hidden mb-2 flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity"
-          title="展开侧边栏"
-        >
+        {/* Logo — decorative */}
+        <div className="w-10 h-10 rounded-xl overflow-hidden mb-2 flex-shrink-0">
           <img src={`${import.meta.env.BASE_URL}icons/icon-192.png`} alt="HappyClaw" className="w-full h-full object-cover" />
-        </button>
+        </div>
 
         {navItems.map(({ path, icon: Icon, label }) => (
           <Tooltip key={path}>

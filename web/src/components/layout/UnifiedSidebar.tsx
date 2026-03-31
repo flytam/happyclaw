@@ -97,21 +97,18 @@ export function UnifiedSidebar({ collapsed, onToggleCollapse }: UnifiedSidebarPr
     return { mainGroup: main, otherGroups: others };
   }, [groups]);
 
-  const filteredOtherGroups = otherGroups;
-  const filteredMainGroup = mainGroup;
-
   const { pinnedGroups, mySections, collabSections } = useMemo(() => {
     const pinned: GroupEntry[] = [];
     const my: GroupEntry[] = [];
     const collab: GroupEntry[] = [];
-    filteredOtherGroups.forEach((g) => {
+    otherGroups.forEach((g) => {
       if (g.pinned_at) pinned.push(g);
       else if (g.is_shared && (g.member_count ?? 0) >= 2) collab.push(g);
       else my.push(g);
     });
     pinned.sort((a, b) => (a.pinned_at || '').localeCompare(b.pinned_at || ''));
     return { pinnedGroups: pinned, mySections: groupByDate(my), collabSections: groupByDate(collab) };
-  }, [filteredOtherGroups]);
+  }, [otherGroups]);
 
   const handleGroupSelect = (jid: string, folder: string) => { selectGroup(jid); navigate(`/chat/${folder}`); };
   const handleCreated = (jid: string, folder: string) => { selectGroup(jid); navigate(`/chat/${folder}`); };
@@ -141,8 +138,6 @@ export function UnifiedSidebar({ collapsed, onToggleCollapse }: UnifiedSidebarPr
     try { const ok = await clearHistory(clearState.jid); if (ok) setClearState({ open: false, jid: '', name: '' }); }
     finally { setClearLoading(false); }
   };
-
-  const allGroups = mainGroup ? [mainGroup, ...otherGroups] : otherGroups;
 
   const renderSections = (sections: DateSection[], showCollabBadge: boolean) =>
     sections.map((section) => (
@@ -210,85 +205,82 @@ export function UnifiedSidebar({ collapsed, onToggleCollapse }: UnifiedSidebarPr
           );
         })}
 
-          {/* Spacer */}
-          <div className="flex-1" />
+        {/* Spacer */}
+        <div className="flex-1" />
 
-          {/* Spacer */}
+        {/* Bug report */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button onClick={() => setShowBugReport(true)} className="w-10 h-10 rounded-lg flex items-center justify-center text-muted-foreground hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors">
+              <Bug className="w-4 h-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">报告问题</TooltipContent>
+        </Tooltip>
+
+        {/* User avatar popover */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <button className="rounded-full hover:ring-2 hover:ring-brand-200 transition-all cursor-pointer mb-2">
+              <EmojiAvatar emoji={user?.avatar_emoji} color={user?.avatar_color} fallbackChar={userInitial} size="md" className="w-8 h-8" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent side="right" align="end" className="w-44 p-1">
+            <div className="px-3 py-2 text-xs font-medium text-muted-foreground truncate border-b border-border mb-1">{user?.display_name || user?.username}</div>
+            <button onClick={() => navigate('/settings?tab=profile')} className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-accent text-foreground cursor-pointer">
+              <UserCog className="w-4 h-4" /> 个人设置
+            </button>
+            <button onClick={() => { useAuthStore.getState().logout(); navigate('/login'); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-destructive/10 text-destructive cursor-pointer">
+              <LogOut className="w-4 h-4" /> 退出登录
+            </button>
+          </PopoverContent>
+        </Popover>
+      </nav>
+
+      {/* ═══ Right column: workspace panel (ONLY this animates) ═══ */}
+      <div
+        className="h-full overflow-hidden transition-[width] duration-200 ease-linear"
+        style={{ width: panelWidth }}
+      >
+        {/* Fixed-width inner — never shrinks, just gets clipped */}
+        <div className="w-[16.5rem] h-full flex flex-col bg-muted/30">
+          {/* Panel header — vertically aligned with left column logo */}
+          <div className="flex items-center gap-2 px-4 pt-6 pb-3 mb-3 flex-shrink-0">
+            <img src={`${import.meta.env.BASE_URL}icons/logo-text.svg`} alt={appearance?.appName || 'HappyClaw'} className="h-10" />
             <div className="flex-1" />
-
-            {/* Bug report */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button onClick={() => setShowBugReport(true)} className="w-10 h-10 rounded-lg flex items-center justify-center text-muted-foreground hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors">
-                  <Bug className="w-4 h-4" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">报告问题</TooltipContent>
-            </Tooltip>
-
-            {/* User avatar popover */}
-            <Popover>
-              <PopoverTrigger asChild>
-                <button className="rounded-full hover:ring-2 hover:ring-brand-200 transition-all cursor-pointer mb-2">
-                  <EmojiAvatar emoji={user?.avatar_emoji} color={user?.avatar_color} fallbackChar={userInitial} size="md" className="w-8 h-8" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent side="right" align="end" className="w-44 p-1">
-                <div className="px-3 py-2 text-xs font-medium text-muted-foreground truncate border-b border-border mb-1">{user?.display_name || user?.username}</div>
-                <button onClick={() => navigate('/settings?tab=profile')} className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-accent text-foreground cursor-pointer">
-                  <UserCog className="w-4 h-4" /> 个人设置
-                </button>
-                <button onClick={() => { useAuthStore.getState().logout(); navigate('/login'); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-destructive/10 text-destructive cursor-pointer">
-                  <LogOut className="w-4 h-4" /> 退出登录
-                </button>
-              </PopoverContent>
-          </Popover>
-        </nav>
-
-        {/* ═══ Right column: workspace panel (ONLY this animates) ═══ */}
-        <div
-            className="h-full overflow-hidden transition-[width] duration-200 ease-linear"
-            style={{ width: panelWidth }}
-          >
-            {/* Fixed-width inner — never shrinks, just gets clipped */}
-            <div className="w-[16.5rem] h-full flex flex-col bg-muted/30">
-              {/* Panel header — vertically aligned with left column logo */}
-              <div className="flex items-center gap-2 px-4 pt-6 pb-3 mb-3 flex-shrink-0">
-                <img src={`${import.meta.env.BASE_URL}icons/logo-text.svg`} alt={appearance?.appName || 'HappyClaw'} className="h-10" />
-                <div className="flex-1" />
-                <button onClick={onToggleCollapse} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
-                  <PanelLeftClose className="w-4 h-4" />
-                </button>
-              </div>
-              {/* New workspace button */}
-              <div className="px-3 pb-2 flex-shrink-0">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full justify-start gap-2 text-xs"
-                  onClick={() => setCreateOpen(true)}
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  新工作区
-                </Button>
-              </div>
+            <button onClick={onToggleCollapse} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-accent text-muted-foreground hover:text-foreground transition-colors cursor-pointer">
+              <PanelLeftClose className="w-4 h-4" />
+            </button>
+          </div>
+          {/* New workspace button */}
+          <div className="px-3 pb-2 flex-shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-start gap-2 text-xs"
+              onClick={() => setCreateOpen(true)}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              新工作区
+            </Button>
+          </div>
 
               {/* Workspace list */}
               <div className="flex-1 overflow-y-auto px-1.5">
-                {loading && allGroups.length === 0 ? (
+                {loading && !mainGroup && otherGroups.length === 0 ? (
                   <SkeletonCardList count={6} compact />
                 ) : (
                   <>
-                    {filteredMainGroup && (
+                    {mainGroup && (
                       <div className="mb-1">
                         <div className="px-2 pt-1 pb-1">
                           <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">主工作区</span>
                         </div>
                         <ChatGroupItem
-                          jid={filteredMainGroup.jid} name={filteredMainGroup.name} folder={filteredMainGroup.folder}
-                          lastMessage={filteredMainGroup.lastMessage} executionMode={filteredMainGroup.execution_mode}
-                          isActive={currentGroup === filteredMainGroup.jid} isHome
-                          isRunning={runnerStates[filteredMainGroup.jid] === 'running'} editable
+                          jid={mainGroup.jid} name={mainGroup.name} folder={mainGroup.folder}
+                          lastMessage={mainGroup.lastMessage} executionMode={mainGroup.execution_mode}
+                          isActive={currentGroup === mainGroup.jid} isHome
+                          isRunning={runnerStates[mainGroup.jid] === 'running'} editable
                           onSelect={handleGroupSelect}
                           onRename={(jid, name) => setRenameState({ open: true, jid, name })}
                           onClearHistory={(jid, name) => setClearState({ open: true, jid, name })}
@@ -320,7 +312,7 @@ export function UnifiedSidebar({ collapsed, onToggleCollapse }: UnifiedSidebarPr
                       </div>
                     )}
 
-                    {mySections.length === 0 && collabSections.length === 0 && pinnedGroups.length === 0 && !filteredMainGroup ? (
+                    {mySections.length === 0 && collabSections.length === 0 && pinnedGroups.length === 0 && !mainGroup ? (
                       <div className="flex flex-col items-center justify-center h-32 px-4">
                         <p className="text-xs text-muted-foreground text-center">暂无工作区</p>
                       </div>
@@ -348,10 +340,10 @@ export function UnifiedSidebar({ collapsed, onToggleCollapse }: UnifiedSidebarPr
                     )}
                   </>
                 )}
-              </div>{/* workspace scroll */}
-            </div>{/* w-[16.5rem] inner */}
-          </div>{/* panel transition */}
-        </div>{/* h-full flex container */}
+          </div>{/* workspace scroll */}
+        </div>{/* w-[16.5rem] inner */}
+      </div>{/* panel transition */}
+    </div>{/* h-full flex container */}
 
         <BugReportDialog open={showBugReport} onClose={() => setShowBugReport(false)} />
         <CreateContainerDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={handleCreated} />

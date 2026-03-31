@@ -563,6 +563,7 @@ export const MessageBubble = memo(function MessageBubble({ message, showTime, th
               onClick={handleCopy}
               className="h-7 px-2 rounded-md flex items-center gap-1 text-muted-foreground hover:text-foreground hover:bg-foreground/5 text-xs cursor-pointer transition-colors"
               title="复制"
+              aria-label="复制消息"
             >
               {copied ? <Check className="w-3.5 h-3.5 text-primary" /> : <Copy className="w-3.5 h-3.5" />}
             </button>
@@ -570,6 +571,7 @@ export const MessageBubble = memo(function MessageBubble({ message, showTime, th
               onClick={() => setShowShareDialog(true)}
               className="h-7 px-2 rounded-md flex items-center gap-1 text-muted-foreground hover:text-foreground hover:bg-foreground/5 text-xs max-lg:hidden cursor-pointer transition-colors"
               title="分享"
+              aria-label="生成分享图片"
             >
               <ImageDown className="w-3.5 h-3.5" />
             </button>
@@ -577,6 +579,7 @@ export const MessageBubble = memo(function MessageBubble({ message, showTime, th
               onClick={handleMenuButton}
               className="h-7 px-2 rounded-md flex items-center gap-1 text-muted-foreground hover:text-foreground hover:bg-foreground/5 text-xs cursor-pointer transition-colors"
               title="更多"
+              aria-label="消息菜单"
             >
               <Ellipsis className="w-3.5 h-3.5" />
             </button>

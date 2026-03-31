@@ -73,6 +73,7 @@ export function SettingsNav({ activeTab, onTabChange, canManageSystemConfig, can
 
   const visibleFeatures = featureItems.filter((item) => {
     if (item.key === 'users' && !canManageUsers) return false;
+    if (item.key === 'monitor' && !canManageSystemConfig) return false;
     return true;
   });
   if (visibleFeatures.length > 0) {

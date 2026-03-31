@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { useChatStore } from '../../stores/chat';
-import { useAuthStore } from '../../stores/auth';
 import { useGroupsStore } from '../../stores/groups';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/common';
@@ -39,7 +38,7 @@ interface ChatSidebarProps {
   onToggleCollapse?: () => void;
 }
 
-export function ChatSidebar({ className, onToggleCollapse }: ChatSidebarProps) {
+export function ChatSidebar({ className }: ChatSidebarProps) {
   const [createOpen, setCreateOpen] = useState(false);
 
   // Rename dialog state
@@ -94,13 +93,11 @@ export function ChatSidebar({ className, onToggleCollapse }: ChatSidebarProps) {
 
   // Split non-main groups into pinned / private / collaborative, then sub-group by date
   const { pinnedGroups, mySections, collabSections } = useMemo(() => {
-    const filtered = otherGroups;
-
     const pinned: typeof otherGroups = [];
     const my: typeof otherGroups = [];
     const collab: typeof otherGroups = [];
 
-    filtered.forEach((g) => {
+    otherGroups.forEach((g) => {
       if (g.pinned_at) {
         pinned.push(g);
       } else if (g.is_shared && (g.member_count ?? 0) >= 2) {
@@ -121,8 +118,6 @@ export function ChatSidebar({ className, onToggleCollapse }: ChatSidebarProps) {
     navigate(`/chat/${folder}`);
   };
 
-  const appearance = useAuthStore((s) => s.appearance);
-  const appName = appearance?.appName || 'HappyClaw';
   const runnerStates = useGroupsStore((s) => s.runnerStates);
 
   const handleCreated = (jid: string, folder: string) => {

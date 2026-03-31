@@ -35,7 +35,6 @@ export function ChatGroupItem({
   name,
   folder,
   lastMessage,
-  executionMode,
   isShared,
   memberRole,
   memberCount,
