@@ -578,7 +578,7 @@ function createPreCompactHook(
  * Extract recent conversation history from a session's JSONL transcript.
  * Used when session resume fails to inject context into the fresh session's prompt.
  */
-function extractSessionHistory(oldSessionId: string, currentPrompt: string): string | null {
+function extractSessionHistory(oldSessionId: string): string | null {
   try {
     const configDir = process.env.CLAUDE_CONFIG_DIR
       || path.join(process.env.HOME || '/home/node', '.claude');
@@ -603,8 +603,8 @@ function extractSessionHistory(oldSessionId: string, currentPrompt: string): str
     const historyLines = recentMessages.map((m) => {
       const role = m.role === 'user' ? 'User' : 'HappyClaw';
       const truncated = m.content.length > 500 ? m.content.slice(0, 500) + '…' : m.content;
-      // Strip lone surrogates to avoid API JSON errors
-      const cleaned = truncated.replace(/[\uD800-\uDFFF]/g, '');
+      // Strip lone surrogates (unpaired) to avoid API JSON errors, preserving valid surrogate pairs (emoji etc.)
+      const cleaned = truncated.replace(/(?:[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF])/g, '');
       return `[${role}] ${cleaned}`;
     });
 
@@ -1752,7 +1752,7 @@ async function main(): Promise<void> {
         log(`Session resume failed, retrying with fresh session (old: ${sessionId})`);
         // Extract recent history from the old session transcript before clearing
         if (sessionId) {
-          const historyContext = extractSessionHistory(sessionId, prompt);
+          const historyContext = extractSessionHistory(sessionId);
           if (historyContext) {
             prompt = historyContext + prompt;
             log(`Injected session history context into prompt for fresh session retry`);
