@@ -63,8 +63,14 @@ export interface IMChannelConnectOpts {
     chatName: string,
     code: string,
   ) => Promise<boolean>;
-  /** Slash command callback (e.g. /clear). Returns reply text or null. */
-  onCommand?: (chatJid: string, command: string) => Promise<string | null>;
+  /** Slash command callback (e.g. /clear). Returns reply text or null.
+   *  senderImId is the channel-specific user ID (e.g. Discord user.id, Telegram from.id);
+   *  channels that don't have a stable per-user ID may pass undefined. */
+  onCommand?: (
+    chatJid: string,
+    command: string,
+    senderImId?: string,
+  ) => Promise<string | null>;
   /** 根据 jid 解析群组 folder，用于下载文件/图片到工作区 */
   resolveGroupFolder?: (jid: string) => string | undefined;
   /** 将 IM chatJid 解析为绑定目标 JID（conversation agent 或工作区主对话） */

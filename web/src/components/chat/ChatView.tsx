@@ -28,6 +28,17 @@ import { showToast } from '../../utils/toast';
 /** Sentinel value for binding the main conversation (vs. a specific agent) */
 const MAIN_BINDING = '__main__' as const;
 
+// IM channel display labels — used by the data-driven ChannelBadge renderer in the
+// chat header. Add new channels here when extending IM connection support.
+const IM_CHANNEL_LABELS: Record<string, string> = {
+  feishu: '飞书',
+  telegram: 'Telegram',
+  discord: 'Discord',
+  qq: 'QQ',
+  wechat: '微信',
+  dingtalk: '钉钉',
+};
+
 const SIDEBAR_TABS = [
   { id: 'files' as const, icon: FolderOpen, label: '文件管理' },
   { id: 'env' as const, icon: Variable, label: '环境变量' },
@@ -507,24 +518,14 @@ export function ChatView({ groupJid, onBack, headerLeft }: ChatViewProps) {
             {isOwnHome && imStatus && Object.entries(imStatus).some(([, v]) => v) && (
               <>
                 <span className="text-muted-foreground/40">·</span>
-                {imStatus.feishu && (
-                  <span className="inline-flex items-center gap-0.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    飞书
-                  </span>
-                )}
-                {imStatus.telegram && (
-                  <span className="inline-flex items-center gap-0.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    Telegram
-                  </span>
-                )}
-                {imStatus.discord && (
-                  <span className="inline-flex items-center gap-0.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    Discord
-                  </span>
-                )}
+                {Object.entries(imStatus)
+                  .filter(([, connected]) => connected)
+                  .map(([channel]) => (
+                    <span key={channel} className="inline-flex items-center gap-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      {IM_CHANNEL_LABELS[channel] ?? channel}
+                    </span>
+                  ))}
               </>
             )}
           </div>
@@ -573,7 +574,7 @@ export function ChatView({ groupJid, onBack, headerLeft }: ChatViewProps) {
       {isOwnHome && imStatus && !Object.values(imStatus).some(Boolean) && !imBannerDismissed && (
         <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-sm">
           <Link className="w-4 h-4 flex-shrink-0" />
-          <span className="flex-1 min-w-0">未配置 IM 渠道，飞书 / Telegram 消息无法与主工作区互通</span>
+          <span className="flex-1 min-w-0">未配置 IM 渠道（飞书 / Telegram / Discord / QQ / 微信 / 钉钉），消息无法与主工作区互通</span>
           <button
             onClick={() => navigate('/setup/channels')}
             className="flex-shrink-0 px-3 py-1 text-xs font-medium rounded-md bg-amber-600 text-white hover:bg-amber-700 transition-colors cursor-pointer"

@@ -2163,6 +2163,7 @@ configRoutes.post('/user-im/discord/test', authMiddleware, async (c) => {
     return c.json({ error: 'Discord Bot Token not configured' }, 400);
   }
 
+  let timeoutId: NodeJS.Timeout | undefined;
   try {
     // Test by creating a temporary Client and logging in
     const { Client, GatewayIntentBits } = await import('discord.js');
@@ -2187,12 +2188,12 @@ configRoutes.post('/user-im/discord/test', authMiddleware, async (c) => {
           });
         },
       ),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => {
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
           testClient.destroy();
           reject(new Error('Connection test timed out (10s)'));
-        }, 10000),
-      ),
+        }, 10000);
+      }),
     ]);
 
     return c.json(result);
@@ -2201,6 +2202,10 @@ configRoutes.post('/user-im/discord/test', authMiddleware, async (c) => {
       err instanceof Error ? err.message : 'Connection test failed';
     logger.warn({ err }, 'Discord connection test failed');
     return c.json({ error: message }, 400);
+  } finally {
+    // Defense-in-depth: clear the race timer in both success and failure paths
+    // so the process doesn't keep an active handle for up to 10s after the test.
+    if (timeoutId) clearTimeout(timeoutId);
   }
 });
 

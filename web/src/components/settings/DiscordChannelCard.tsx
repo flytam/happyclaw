@@ -191,8 +191,13 @@ export function DiscordChannelCard() {
               />
             </div>
 
-            <div className="text-xs text-muted-foreground mt-2">
+            <div className="text-xs text-muted-foreground mt-2 space-y-1">
               <p>获取 Bot Token：Discord Developer Portal → Applications → Bot → Token</p>
+              <p>
+                斜杠命令首次注册后通过 Discord Global Commands 通道分发，
+                Discord 官方说明可能需要 5-60 分钟才在所有服务器生效。期间可以用纯文本命令兜底，
+                例如直接发送 <code>/clear</code>、<code>/list</code>、<code>/status</code>。
+              </p>
             </div>
           </>
         )}

@@ -732,40 +732,18 @@ export function createDiscordConnection(
           }
         });
 
-        // Message create event — use raw event as primary to ensure DM delivery,
-        // then resolve the Message object from cache or API
-        discordClient.on('raw', async (packet: { t: string; d: any }) => {
-          if (packet.t !== 'MESSAGE_CREATE') return;
+        // Message create event — use Events.MessageCreate which delivers a fully
+        // resolved Message object directly. With Partials.Channel + Partials.Message
+        // configured (line 658), DMs are also delivered without needing raw fallback.
+        // This avoids the 2x REST fetch (channels.fetch + messages.fetch) per message
+        // that the previous raw-event handler incurred.
+        discordClient.on(Events.MessageCreate, async (msg) => {
           if (stopping) return;
+          if (msg.author?.bot) return;
           try {
-            const data = packet.d;
-            // Skip bot messages early (before resolving full Message)
-            if (data.author?.bot) return;
-
-            // Try to get the Message from the discord.js cache
-            const channelId = data.channel_id;
-            let channel = discordClient!.channels.cache.get(channelId) ?? undefined;
-            if (!channel) {
-              try {
-                channel = (await discordClient!.channels.fetch(channelId)) ?? undefined;
-              } catch {
-                logger.warn({ channelId }, 'Discord: could not fetch channel for raw MESSAGE_CREATE');
-                return;
-              }
-            }
-            if (!channel || !channel.isTextBased()) return;
-
-            let msg: Message;
-            try {
-              msg = await (channel as TextBasedChannel).messages.fetch(data.id);
-            } catch {
-              logger.warn({ msgId: data.id }, 'Discord: could not fetch message from raw event');
-              return;
-            }
-
             await handleMessage(msg, opts);
           } catch (err) {
-            logger.error({ err }, 'Error in Discord raw message handler');
+            logger.error({ err }, 'Error in Discord message handler');
           }
         });
 
