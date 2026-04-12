@@ -365,7 +365,11 @@ adminRoutes.patch(
     }
     if (validation.data.password !== undefined) {
       updates.password_hash = await hashPassword(validation.data.password);
-      updates.must_change_password = true;
+      // Only force password change when resetting OTHER user's password
+      // Admin resetting their own password should not trigger forced change
+      if (id !== actor.id) {
+        updates.must_change_password = true;
+      }
       invalidateUserSessions(id);
       deleteUserSessionsByUserId(id);
       logAuthEvent({
