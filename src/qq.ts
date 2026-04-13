@@ -345,8 +345,8 @@ export function createQQConnection(config: QQConnectionConfig): QQConnection {
         : `/v2/groups/${openid}/messages`;
 
     await apiRequest('POST', endpoint, {
-      content,
-      msg_type: 0, // text
+      markdown: { content },
+      msg_type: 2, // markdown
       msg_seq: msgSeq,
     });
   }
@@ -1099,8 +1099,7 @@ export function createQQConnection(config: QQConnectionConfig): QQConnection {
       }
 
       try {
-        const plainText = markdownToPlainText(text);
-        const chunks = splitTextChunks(plainText, MSG_SPLIT_LIMIT);
+        const chunks = splitTextChunks(text, MSG_SPLIT_LIMIT);
 
         for (const chunk of chunks) {
           await sendQQMessage(parsed.type, parsed.openid, chunk);
