@@ -10,6 +10,7 @@
  * Reference: https://github.com/sliverp/qqbot (QQ Bot API v2)
  */
 import crypto from 'crypto';
+import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import WebSocket from 'ws';
@@ -1091,7 +1092,11 @@ export function createQQConnection(config: QQConnectionConfig): QQConnection {
       logger.info('QQ bot disconnected');
     },
 
-    async sendMessage(chatId: string, text: string): Promise<void> {
+    async sendMessage(
+      chatId: string,
+      text: string,
+      localImagePaths?: string[],
+    ): Promise<void> {
       const parsed = parseQQChatId(chatId);
       if (!parsed) {
         logger.error({ chatId }, 'Invalid QQ chat ID format');
@@ -1104,6 +1109,20 @@ export function createQQConnection(config: QQConnectionConfig): QQConnection {
 
         for (const chunk of chunks) {
           await sendQQMessage(parsed.type, parsed.openid, chunk);
+        }
+
+        // Send local images after text (same pattern as Feishu)
+        for (const imgPath of localImagePaths || []) {
+          try {
+            const buf = fs.readFileSync(imgPath);
+            await sendQQImageMessage(parsed.type, parsed.openid, buf);
+            logger.info({ chatId, imgPath }, 'QQ local image sent');
+          } catch (imgErr) {
+            logger.warn(
+              { err: imgErr, chatId, imgPath },
+              'Failed to send local image via QQ',
+            );
+          }
         }
 
         logger.info({ chatId }, 'QQ message sent');
