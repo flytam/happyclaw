@@ -3212,6 +3212,8 @@ export function listUsers(options: ListUsersOptions = {}): ListUsersResult {
   if (status) {
     whereParts.push('u.status = ?');
     params.push(status);
+  } else {
+    whereParts.push("u.status != 'deleted'");
   }
   if (query) {
     whereParts.push(
