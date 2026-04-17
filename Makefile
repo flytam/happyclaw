@@ -210,7 +210,7 @@ ensure-latest-sdk: ## 启动前自动检测并更新 SDK（有新版才更新）
 	LATEST=$$(npm view @anthropic-ai/claude-agent-sdk version --fetch-timeout=5000 2>/dev/null || echo "$$LOCAL"); \
 	if [ "$$LOCAL" != "$$LATEST" ]; then \
 		echo "🔄 Claude Agent SDK 有新版本: $$LOCAL → $$LATEST，正在更新..."; \
-		cd container/agent-runner && $(PKG) update @anthropic-ai/claude-agent-sdk && $(PKG) run build; \
+		(cd container/agent-runner && $(PKG) update @anthropic-ai/claude-agent-sdk && $(PKG) run build); \
 		sed -i '' 's/"@anthropic-ai\/claude-agent-sdk": "[^"]*"/"@anthropic-ai\/claude-agent-sdk": "*"/' container/agent-runner/package.json; \
 		echo "✅ SDK 更新完成（内置 Claude Code 版本随之更新）"; \
 	else \
