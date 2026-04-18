@@ -4032,6 +4032,14 @@ function broadcastToOwnerIMChannels(
       getConnectedChannelTypes: imManager.getConnectedChannelTypes.bind(imManager),
       getGroupsByOwner,
       getChannelType,
+      resolveJidFolder: (jid: string) => {
+        // Follow ImBindingDialog's target_main_jid binding: look up the
+        // referenced workspace and return its folder. Cache-first
+        // (registeredGroups) then DB fallback — mirrors the lookup pattern
+        // used by resolveOwnerHomeFolder at src/index.ts:593-598.
+        const target = registeredGroups[jid] ?? getRegisteredGroup(jid);
+        return target?.folder ?? null;
+      },
     },
   );
 }

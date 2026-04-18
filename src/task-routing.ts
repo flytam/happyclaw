@@ -140,8 +140,57 @@ export function resolveTaskRoutingDecision(
 
 export interface BroadcastToOwnerIMChannelsDeps {
   getConnectedChannelTypes: (userId: string) => string[];
-  getGroupsByOwner: (userId: string) => Array<{ jid: string; folder: string }>;
+  getGroupsByOwner: (
+    userId: string,
+  ) => Array<{
+    jid: string;
+    folder: string;
+    /**
+     * Set by ImBindingDialog when an IM group is explicitly bound to a
+     * non-home workspace. Overrides the group's own `folder` for routing
+     * purposes — see resolveImGroupEffectiveFolder.
+     */
+    target_main_jid?: string | null;
+  }>;
   getChannelType: (jid: string) => string | null;
+  /**
+   * Resolve a `web:xxx` JID to the workspace folder it points to. Used to
+   * follow `target_main_jid` bindings when matching broadcast targets.
+   * Return null for unknown / unresolvable JIDs so the caller can fall
+   * back to the IM group's own folder.
+   */
+  resolveJidFolder: (jid: string) => string | null;
+}
+
+/**
+ * Compute the workspace folder an IM group should be considered to "belong"
+ * to when the scheduled-task broadcaster is looking for recipients.
+ *
+ * There are TWO ways a user can bind an IM group to a workspace:
+ *
+ * 1. **Shared folder** — the IM group's own `folder` matches the workspace's
+ *    folder. Used for home workspaces (auto-registered via onNewChat) and
+ *    some migration flows.
+ * 2. **target_main_jid** — the IM group keeps its own `folder` (usually the
+ *    home folder) but stores a pointer to the intended workspace via
+ *    `target_main_jid`. Used by the ImBindingDialog UI.
+ *
+ * Both must be respected by the broadcast matcher; otherwise scheduled
+ * tasks created in non-home workspaces will silently fail to reach
+ * their bound IM groups when the binding is the (2) kind.
+ *
+ * Precedence: `target_main_jid` wins when present and resolvable, matching
+ * the semantics used by `resolveOwnerHomeFolder` in src/index.ts.
+ */
+export function resolveImGroupEffectiveFolder(
+  group: { folder: string; target_main_jid?: string | null },
+  resolveJidFolder: (jid: string) => string | null,
+): string {
+  if (group.target_main_jid) {
+    const resolved = resolveJidFolder(group.target_main_jid);
+    if (resolved) return resolved;
+  }
+  return group.folder;
 }
 
 /**
@@ -197,9 +246,16 @@ export function broadcastToOwnerIMChannels(
   for (const channelType of connectedTypes) {
     if (sentChannelTypes.has(channelType)) continue;
     if (notifyChannels && !notifyChannels.includes(channelType)) continue;
-    const target = ownerGroups.find(
-      (g) => deps.getChannelType(g.jid) === channelType && g.folder === sourceFolder,
-    );
+    const target = ownerGroups.find((g) => {
+      if (deps.getChannelType(g.jid) !== channelType) return false;
+      // Match on the group's *effective* routing folder so both "shared
+      // folder" and "target_main_jid" bindings reach this broadcaster.
+      // Without this, ImBindingDialog-bound IM groups (whose own folder
+      // stays at 'main') silently miss scheduled-task broadcasts from
+      // non-home workspaces.
+      const effectiveFolder = resolveImGroupEffectiveFolder(g, deps.resolveJidFolder);
+      return effectiveFolder === sourceFolder;
+    });
     if (target) {
       sendFn(target.jid);
       sentChannelTypes.add(channelType);

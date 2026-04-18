@@ -2919,6 +2919,8 @@ export function getGroupsByOwner(
     created_by: string | null;
     is_home: number;
     selected_skills: string | null;
+    target_main_jid: string | null;
+    target_agent_id: string | null;
   }>;
 
   return rows.map((row) => ({
@@ -2935,6 +2937,8 @@ export function getGroupsByOwner(
     initGitUrl: row.init_git_url ?? undefined,
     created_by: row.created_by ?? undefined,
     is_home: row.is_home === 1,
+    target_main_jid: row.target_main_jid ?? undefined,
+    target_agent_id: row.target_agent_id ?? undefined,
   }));
 }
 

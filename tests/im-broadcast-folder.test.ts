@@ -33,6 +33,7 @@ describe('broadcastToOwnerIMChannels — folder-precise routing (fix F regressio
         { jid: 'tg:T1', folder: 'home-u' },
       ],
       getChannelType: fakeGetChannelType,
+      resolveJidFolder: () => null,
     };
 
     broadcastToOwnerIMChannels(
@@ -59,6 +60,7 @@ describe('broadcastToOwnerIMChannels — folder-precise routing (fix F regressio
         { jid: 'tg:T1', folder: 'home-u' },
       ],
       getChannelType: fakeGetChannelType,
+      resolveJidFolder: () => null,
     };
 
     broadcastToOwnerIMChannels(
@@ -83,6 +85,7 @@ describe('broadcastToOwnerIMChannels — folder-precise routing (fix F regressio
         { jid: 'tg:T1', folder: 'home-u' },
       ],
       getChannelType: fakeGetChannelType,
+      resolveJidFolder: () => null,
     };
 
     broadcastToOwnerIMChannels(
@@ -108,6 +111,7 @@ describe('broadcastToOwnerIMChannels — folder-precise routing (fix F regressio
         { jid: 'tg:T1', folder: 'ws-x' }, // also bound to ws-x for this case
       ],
       getChannelType: fakeGetChannelType,
+      resolveJidFolder: () => null,
     };
 
     broadcastToOwnerIMChannels(
@@ -134,6 +138,7 @@ describe('broadcastToOwnerIMChannels — folder-precise routing (fix F regressio
         { jid: 'tg:T1', folder: 'ws-x' },
       ],
       getChannelType: fakeGetChannelType,
+      resolveJidFolder: () => null,
     };
 
     broadcastToOwnerIMChannels(
@@ -158,6 +163,7 @@ describe('broadcastToOwnerIMChannels — folder-precise routing (fix F regressio
         { jid: 'tg:T1', folder: 'ws-x' },
       ],
       getChannelType: fakeGetChannelType,
+      resolveJidFolder: () => null,
     };
 
     broadcastToOwnerIMChannels(
@@ -186,6 +192,7 @@ describe('broadcastToOwnerIMChannels — folder-precise routing (fix F regressio
         { jid: 'feishu:F-wsx', folder: 'ws-x' },
       ],
       getChannelType: fakeGetChannelType,
+      resolveJidFolder: () => null,
     };
 
     broadcastToOwnerIMChannels(
@@ -210,6 +217,7 @@ describe('broadcastToOwnerIMChannels — folder-precise routing (fix F regressio
       getConnectedChannelTypes: () => ['feishu'],
       getGroupsByOwner: () => [{ jid: 'tg:T1', folder: 'ws-x' }],
       getChannelType: fakeGetChannelType,
+      resolveJidFolder: () => null,
     };
 
     broadcastToOwnerIMChannels(
@@ -222,5 +230,143 @@ describe('broadcastToOwnerIMChannels — folder-precise routing (fix F regressio
     );
 
     expect(sendFn).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Regression suite for a bug discovered after fix F shipped: the
+ * ImBindingDialog UI binds an IM group to a non-home workspace via
+ * `target_main_jid` WITHOUT changing the group's own `folder`. The
+ * initial fix F only matched on folder equality, so scheduled tasks in
+ * non-home workspaces silently failed to reach their bound IM groups
+ * when the binding was of the target_main_jid kind.
+ *
+ * These tests lock in that `resolveImGroupEffectiveFolder` (via
+ * resolveJidFolder) is consulted during matching, so both binding
+ * mechanisms work:
+ *   - shared folder (handled by the suite above)
+ *   - target_main_jid redirection (this suite)
+ */
+describe('broadcastToOwnerIMChannels — target_main_jid binding (ImBindingDialog)', () => {
+  test('IM group with target_main_jid matches via resolved target folder, not own folder', () => {
+    // Feishu group's own folder is 'home-u' (registered there on first contact),
+    // but the user bound it to workspace 'ws-x' via ImBindingDialog. The binding
+    // is stored as target_main_jid='web:ws-x-jid'. A scheduled task running in
+    // ws-x (sourceFolder='ws-x') must still fan out to this Feishu group.
+    const sendFn = vi.fn<(jid: string) => void>();
+    const deps: BroadcastToOwnerIMChannelsDeps = {
+      getConnectedChannelTypes: () => ['feishu'],
+      getGroupsByOwner: () => [
+        {
+          jid: 'feishu:F-bound',
+          folder: 'home-u',
+          target_main_jid: 'web:ws-x-jid',
+        },
+      ],
+      getChannelType: fakeGetChannelType,
+      resolveJidFolder: (jid) => (jid === 'web:ws-x-jid' ? 'ws-x' : null),
+    };
+
+    broadcastToOwnerIMChannels(
+      'user-1',
+      'ws-x',
+      new Set<string>(),
+      sendFn,
+      undefined,
+      deps,
+    );
+
+    expect(sendFn).toHaveBeenCalledTimes(1);
+    expect(sendFn).toHaveBeenCalledWith('feishu:F-bound');
+  });
+
+  test('target_main_jid takes precedence over own folder when both could match different sourceFolders', () => {
+    // IM group's own folder is 'home-u', target_main_jid points to 'ws-x'.
+    // When sourceFolder='home-u', it MUST NOT match — the binding redirects
+    // this group to ws-x only. (Prevents double-delivery when home and ws-x
+    // both host scheduled tasks.)
+    const sendFn = vi.fn<(jid: string) => void>();
+    const deps: BroadcastToOwnerIMChannelsDeps = {
+      getConnectedChannelTypes: () => ['feishu'],
+      getGroupsByOwner: () => [
+        {
+          jid: 'feishu:F-bound',
+          folder: 'home-u',
+          target_main_jid: 'web:ws-x-jid',
+        },
+      ],
+      getChannelType: fakeGetChannelType,
+      resolveJidFolder: (jid) => (jid === 'web:ws-x-jid' ? 'ws-x' : null),
+    };
+
+    broadcastToOwnerIMChannels(
+      'user-1',
+      'home-u',
+      new Set<string>(),
+      sendFn,
+      undefined,
+      deps,
+    );
+
+    expect(sendFn).not.toHaveBeenCalled();
+  });
+
+  test('target_main_jid that cannot be resolved falls back to own folder', () => {
+    // target_main_jid points to a workspace that was deleted (resolveJidFolder
+    // returns null). The group should gracefully fall back to matching on its
+    // own folder so at least the pre-fix F behavior is preserved.
+    const sendFn = vi.fn<(jid: string) => void>();
+    const deps: BroadcastToOwnerIMChannelsDeps = {
+      getConnectedChannelTypes: () => ['feishu'],
+      getGroupsByOwner: () => [
+        {
+          jid: 'feishu:F-orphan',
+          folder: 'home-u',
+          target_main_jid: 'web:deleted-ws',
+        },
+      ],
+      getChannelType: fakeGetChannelType,
+      resolveJidFolder: () => null, // deleted target
+    };
+
+    broadcastToOwnerIMChannels(
+      'user-1',
+      'home-u',
+      new Set<string>(),
+      sendFn,
+      undefined,
+      deps,
+    );
+
+    expect(sendFn).toHaveBeenCalledTimes(1);
+    expect(sendFn).toHaveBeenCalledWith('feishu:F-orphan');
+  });
+
+  test('group with target_main_jid=null / undefined behaves like legacy folder-only match', () => {
+    // Regression guard: ensure adding the target_main_jid code path didn't
+    // break the existing folder-equality behavior for groups without binding.
+    const sendFn = vi.fn<(jid: string) => void>();
+    const deps: BroadcastToOwnerIMChannelsDeps = {
+      getConnectedChannelTypes: () => ['feishu', 'telegram'],
+      getGroupsByOwner: () => [
+        { jid: 'feishu:F1', folder: 'ws-x', target_main_jid: null },
+        { jid: 'tg:T1', folder: 'ws-x' }, // no target_main_jid field at all
+      ],
+      getChannelType: fakeGetChannelType,
+      resolveJidFolder: () => null,
+    };
+
+    broadcastToOwnerIMChannels(
+      'user-1',
+      'ws-x',
+      new Set<string>(),
+      sendFn,
+      undefined,
+      deps,
+    );
+
+    expect(sendFn).toHaveBeenCalledTimes(2);
+    expect(sendFn).toHaveBeenCalledWith('feishu:F1');
+    expect(sendFn).toHaveBeenCalledWith('tg:T1');
   });
 });
