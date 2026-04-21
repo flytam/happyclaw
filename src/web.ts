@@ -81,6 +81,7 @@ import {
 import { markdownToPlainText } from './im-utils.js';
 import { isSessionExpired } from './auth.js';
 import type {
+  AgentStatus,
   NewMessage,
   WsMessageOut,
   WsMessageIn,
@@ -461,7 +462,7 @@ async function handleAgentConversationMessage(
     if (autoTitle) {
       updateAgentContextInfo(agentId, { name: autoTitle });
       updateChatName(virtualChatJid, autoTitle);
-      broadcastAgentStatus(chatJid, agentId, agent.status as import('./types.js').AgentStatus, autoTitle, agent.prompt);
+      broadcastAgentStatus(chatJid, agentId, agent.status as AgentStatus, autoTitle, agent.prompt);
     }
   }
 
@@ -1624,6 +1625,32 @@ export function broadcastAgentStatus(
     titleGenerating,
   };
   safeBroadcast(msg, isHostGroupJid(chatJid), allowedUserIds);
+}
+
+/**
+ * Broadcast an `agent_status` message that only flips the `titleGenerating`
+ * loading flag — reads `agent.status`/`name`/`prompt` fresh from DB. Used by
+ * the LLM title-generation path so callers don't have to pre-fetch the agent
+ * and pass undefined positional params just to reach the 8th argument.
+ */
+export function broadcastTitleGenerating(
+  chatJid: string,
+  agentId: string,
+  generating: boolean,
+  overrideName?: string,
+): void {
+  const agent = getAgent(agentId);
+  if (!agent) return;
+  broadcastAgentStatus(
+    chatJid,
+    agentId,
+    agent.status as AgentStatus,
+    overrideName ?? agent.name,
+    agent.prompt,
+    undefined,
+    undefined,
+    generating,
+  );
 }
 
 export function broadcastRunnerState(

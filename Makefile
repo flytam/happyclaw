@@ -21,29 +21,26 @@ endif
 
 # ─── Development ─────────────────────────────────────────────
 
+# 单行 shell 片段：运行 dev 命令前暂停 pm2 中的 happyclaw，退出（正常/中断/终止）时恢复。
+# 用法示例：@$(PM2_GUARD); <command>
+PM2_GUARD = PM2_WAS_RUNNING=0; \
+	if command -v pm2 >/dev/null 2>&1 && pm2 show happyclaw 2>/dev/null | grep -q 'online'; then \
+	  PM2_WAS_RUNNING=1; \
+	  echo "⏸  暂停 pm2 happyclaw..."; \
+	  pm2 stop happyclaw; \
+	fi; \
+	trap "if [ \"$$PM2_WAS_RUNNING\" = '1' ]; then echo '▶  恢复 pm2 happyclaw...'; pm2 start happyclaw; fi" EXIT INT TERM
+
 dev: ## 启动前后端（首次自动安装依赖和构建容器镜像）；自动暂停 pm2，退出后恢复
 	@if [ ! -d node_modules ] || [ package.json -nt node_modules ] || [ web/package.json -nt web/node_modules ] || [ container/agent-runner/package.json -nt container/agent-runner/node_modules ]; then echo "📦 依赖有更新，安装依赖..."; $(MAKE) install; fi
 	@$(MAKE) _ensure-docker-image
 	@$(PKG) --prefix container/agent-runner run build --silent 2>/dev/null || $(PKG) --prefix container/agent-runner run build
-	@PM2_WAS_RUNNING=0; \
-	if command -v pm2 >/dev/null 2>&1 && pm2 show happyclaw 2>/dev/null | grep -q 'online'; then \
-	  PM2_WAS_RUNNING=1; \
-	  echo "⏸  暂停 pm2 happyclaw..."; \
-	  pm2 stop happyclaw; \
-	fi; \
-	trap "if [ \"$$PM2_WAS_RUNNING\" = '1' ]; then echo '▶  恢复 pm2 happyclaw...'; pm2 start happyclaw; fi" EXIT INT TERM; \
+	@$(PM2_GUARD); \
 	echo "🚀 使用 $(PKG) 启动..."; \
 	$(PKG) run dev:all
 
 dev-backend: ## 仅启动后端（bun 直接跑 TS，node 用 tsx）；自动暂停 pm2，退出后恢复
-	@PM2_WAS_RUNNING=0; \
-	if command -v pm2 >/dev/null 2>&1 && pm2 show happyclaw 2>/dev/null | grep -q 'online'; then \
-	  PM2_WAS_RUNNING=1; \
-	  echo "⏸  暂停 pm2 happyclaw..."; \
-	  pm2 stop happyclaw; \
-	fi; \
-	trap "if [ \"$$PM2_WAS_RUNNING\" = '1' ]; then echo '▶  恢复 pm2 happyclaw...'; pm2 start happyclaw; fi" EXIT INT TERM; \
-	$(RUNNER)
+	@$(PM2_GUARD); $(RUNNER)
 
 dev-web: ## 仅启动前端
 	cd web && $(PKG) run dev

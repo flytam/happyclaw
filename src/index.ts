@@ -181,6 +181,7 @@ import {
   broadcastTyping,
   broadcastStreamEvent,
   broadcastAgentStatus,
+  broadcastTitleGenerating,
   broadcastGroupCreated,
   broadcastBillingUpdate,
   shutdownTerminals,
@@ -1786,19 +1787,7 @@ async function generateAndApplyLLMTitle(
   updateAgentContextInfo(agentId, { title_source: 'auto' });
 
   // Notify clients that title generation has started → show loading indicator.
-  const startAgent = getAgent(agentId);
-  if (startAgent) {
-    broadcastAgentStatus(
-      chatJid,
-      agentId,
-      startAgent.status as import('./types.js').AgentStatus,
-      startAgent.name,
-      startAgent.prompt,
-      undefined,
-      undefined,
-      true,
-    );
-  }
+  broadcastTitleGenerating(chatJid, agentId, true);
 
   let finalName: string | undefined;
   try {
@@ -1852,19 +1841,7 @@ async function generateAndApplyLLMTitle(
     );
   } finally {
     // Always clear loading indicator, whether LLM succeeded, returned empty, or threw.
-    const endAgent = getAgent(agentId);
-    if (endAgent) {
-      broadcastAgentStatus(
-        chatJid,
-        agentId,
-        endAgent.status as import('./types.js').AgentStatus,
-        finalName ?? endAgent.name,
-        endAgent.prompt,
-        undefined,
-        undefined,
-        false,
-      );
-    }
+    broadcastTitleGenerating(chatJid, agentId, false, finalName);
   }
 }
 
