@@ -196,7 +196,7 @@ interface ChatState {
   deleteFlow: (jid: string) => Promise<void>;
   handleStreamEvent: (chatJid: string, event: StreamEvent, agentId?: string) => void;
   handleWsNewMessage: (chatJid: string, wsMsg: any, agentId?: string, source?: string) => void;
-  handleAgentStatus: (chatJid: string, agentId: string, status: AgentInfo['status'], name: string, prompt: string, resultSummary?: string, kind?: AgentInfo['kind']) => void;
+  handleAgentStatus: (chatJid: string, agentId: string, status: AgentInfo['status'], name: string, prompt: string, resultSummary?: string, kind?: AgentInfo['kind'], titleGenerating?: boolean) => void;
   clearStreaming: (
     chatJid: string,
     options?: { preserveThinking?: boolean },
@@ -1779,7 +1779,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // 处理子 Agent 状态变更事件
-  handleAgentStatus: (chatJid, agentId, status, name, prompt, resultSummary?, kind?) => {
+  handleAgentStatus: (chatJid, agentId, status, name, prompt, resultSummary?, kind?, titleGenerating?) => {
     set((s) => {
       const existing = s.agents[chatJid] || [];
 
@@ -1828,6 +1828,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         created_at: previous?.created_at || new Date().toISOString(),
         completed_at: (status === 'completed' || status === 'error') ? new Date().toISOString() : undefined,
         result_summary: resultSummary,
+        title_generating: typeof titleGenerating === 'boolean' ? titleGenerating : previous?.title_generating,
       };
       const updated = idx >= 0
         ? existing.map((a, i) => (i === idx ? agentInfo : a))
@@ -1869,10 +1870,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       // Conversation agent started running: reset agentWaiting so stream events
       // are accepted (mirrors handleRunnerState for the main conversation).
-      // Without this, Feishu-sourced messages (which skip sendAgentMessage) would
-      // leave agentWaiting=false and cause all streaming events to be dropped.
+      // Skip for title-only broadcasts (titleGenerating set) — those carry the
+      // persistent running status but shouldn't re-open the "waiting" window
+      // after the reply has already finalized.
       const nextAgentWaiting =
-        (resolvedKind === 'conversation' || resolvedKind === 'spawn') && status === 'running'
+        (resolvedKind === 'conversation' || resolvedKind === 'spawn') &&
+        status === 'running' &&
+        typeof titleGenerating !== 'boolean'
           ? { ...s.agentWaiting, [agentId]: true }
           : s.agentWaiting;
 

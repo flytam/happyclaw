@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Plus, X, Link, MessageSquare, Pencil, Trash2 } from 'lucide-react';
+import { Plus, X, Link, MessageSquare, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, arrayMove, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -127,9 +127,14 @@ function SortableTab({ agent, isActive, onSelect, onContextMenu, onTouchStart, o
       onTouchEnd={mergedOnTouchEnd}
       onTouchMove={mergedOnTouchMove}
     >
-      {agent.status === 'running' && (
+      {agent.title_generating ? (
+        <Loader2
+          className="w-3 h-3 animate-spin text-teal-500 flex-shrink-0"
+          aria-label="正在生成标题"
+        />
+      ) : agent.status === 'running' ? (
         <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse flex-shrink-0" />
-      )}
+      ) : null}
       {hasLinked && (
         <span title={`已绑定: ${agent.linked_im_groups!.map(g => g.name).join(', ')}`}>
           <MessageSquare className="w-3 h-3 text-teal-500 flex-shrink-0" />

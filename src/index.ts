@@ -1642,6 +1642,93 @@ async function summarizeWithClaude(transcript: string): Promise<string | null> {
   return sdkQuery(prompt, { model, timeout: 30_000 });
 }
 
+/**
+ * After an agent conversation's first reply finalizes, upgrade the placeholder
+ * title to an LLM-generated one. Fire-and-forget; optimistically flips
+ * title_source to 'auto' up-front so concurrent replies don't double-trigger.
+ */
+async function generateAndApplyLLMTitle(
+  agentId: string,
+  chatJid: string,
+  virtualChatJid: string,
+): Promise<void> {
+  updateAgentContextInfo(agentId, { title_source: 'auto' });
+
+  // Notify clients that title generation has started → show loading indicator.
+  const startAgent = getAgent(agentId);
+  if (startAgent) {
+    broadcastAgentStatus(
+      chatJid,
+      agentId,
+      startAgent.status as import('./types.js').AgentStatus,
+      startAgent.name,
+      startAgent.prompt,
+      undefined,
+      undefined,
+      true,
+    );
+  }
+
+  let finalName: string | undefined;
+  try {
+    const recent = getMessagesPage(virtualChatJid, undefined, 6)
+      .slice()
+      .reverse();
+    const firstUser = recent.find((m) => !m.is_from_me);
+    const firstAI = recent.find((m) => m.is_from_me);
+    if (!firstUser) return;
+
+    const userText = (firstUser.content || '').slice(0, 500);
+    const aiText = (firstAI?.content || '').slice(0, 500);
+    const prompt =
+      `根据以下对话生成一个简洁的中文标题，用于在会话列表中展示。要求：\n` +
+      `- 不超过 16 个字符\n` +
+      `- 概括用户的核心诉求\n` +
+      `- 不要加标点、引号、emoji、括号\n` +
+      `- 直接输出标题，不要解释\n\n` +
+      `用户: ${userText}\n` +
+      (aiText ? `AI: ${aiText}\n` : '');
+
+    const raw = await sdkQuery(prompt, { timeout: 20_000 });
+    if (!raw) return;
+
+    const cleaned = raw
+      .trim()
+      .split('\n')[0]
+      .replace(/^["'「『《【\[(]+|["'」』》】\])]+$/g, '')
+      .trim()
+      .slice(0, 30);
+    if (!cleaned) return;
+
+    updateAgentContextInfo(agentId, { name: cleaned });
+    updateChatName(virtualChatJid, cleaned);
+    finalName = cleaned;
+  } catch (err) {
+    logger.warn(
+      {
+        err: (err as Error).message?.slice(0, 200),
+        agentId,
+      },
+      'LLM title generation failed',
+    );
+  } finally {
+    // Always clear loading indicator, whether LLM succeeded, returned empty, or threw.
+    const endAgent = getAgent(agentId);
+    if (endAgent) {
+      broadcastAgentStatus(
+        chatJid,
+        agentId,
+        endAgent.status as import('./types.js').AgentStatus,
+        finalName ?? endAgent.name,
+        endAgent.prompt,
+        undefined,
+        undefined,
+        false,
+      );
+    }
+  }
+}
+
 // ─── /sw & /spawn: parallel task spawning ────────────────────────
 
 interface SpawnWorkspace {
@@ -5587,6 +5674,14 @@ async function processAgentConversation(
           },
           agentId,
         );
+
+        // Async LLM title upgrade after the first substantive reply.
+        if (isFirstReply && agent.kind === 'conversation') {
+          const fresh = getAgent(agentId);
+          if (fresh?.title_source === 'auto_pending') {
+            void generateAndApplyLLMTitle(agentId, chatJid, virtualChatJid);
+          }
+        }
 
         const localImagePaths = extractLocalImImagePaths(
           text,

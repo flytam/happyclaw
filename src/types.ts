@@ -379,6 +379,7 @@ export type WsMessageOut =
       name: string;
       prompt: string;
       resultSummary?: string;
+      titleGenerating?: boolean;
     }
   | {
       type: 'runner_state';
