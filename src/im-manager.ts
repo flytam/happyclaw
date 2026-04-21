@@ -75,7 +75,7 @@ export interface DiscordConnectConfig {
 
 export interface ConnectFeishuOptions {
   ignoreMessagesBefore?: number;
-  onCommand?: (chatJid: string, command: string) => Promise<string | null>;
+  onCommand?: (chatJid: string, command: string, senderImId?: string, mentions?: Array<{ key?: string; name?: string; id?: { open_id?: string } }>) => Promise<string | null>;
   resolveGroupFolder?: (chatJid: string) => string | undefined;
   resolveEffectiveChatJid?: (
     chatJid: string,
@@ -86,6 +86,7 @@ export interface ConnectFeishuOptions {
   onBotRemovedFromGroup?: (chatJid: string) => void;
   shouldProcessGroupMessage?: (chatJid: string, senderImId?: string) => boolean;
   isGroupOwnerMessage?: (chatJid: string, senderImId?: string) => boolean;
+  isSenderAllowedInGroup?: (chatJid: string, senderImId?: string) => boolean;
   onCardInterrupt?: (chatJid: string) => void;
 }
 
@@ -382,6 +383,7 @@ class IMConnectionManager {
       onBotRemovedFromGroup: options?.onBotRemovedFromGroup,
       shouldProcessGroupMessage: options?.shouldProcessGroupMessage,
       isGroupOwnerMessage: options?.isGroupOwnerMessage,
+      isSenderAllowedInGroup: options?.isSenderAllowedInGroup,
       onCardInterrupt: options?.onCardInterrupt,
     });
   }

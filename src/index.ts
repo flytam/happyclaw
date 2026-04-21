@@ -1070,6 +1070,7 @@ async function handleCommand(
   chatJid: string,
   command: string,
   senderImId?: string,
+  mentions?: Array<{ key?: string; name?: string; id?: { open_id?: string } }>,
 ): Promise<string | null> {
   const parts = command.split(/\s+/);
   const cmd = parts[0].toLowerCase();
@@ -1101,6 +1102,14 @@ async function handleCommand(
     case 'sw':
     case 'spawn':
       return handleSpawnCommand(chatJid, rawArgs, chatJid);
+    case 'claim':
+      return handleClaimCommand(chatJid, senderImId);
+    case 'allow':
+      return handleAllowCommand(chatJid, senderImId, mentions);
+    case 'disallow':
+      return handleDisallowCommand(chatJid, senderImId, mentions);
+    case 'allowlist':
+      return handleAllowlistCommand(chatJid);
     default:
       return null;
   }
@@ -1529,6 +1538,141 @@ function handleOwnerMentionCommand(chatJid: string, senderImId?: string): string
   );
 
   return `已开启「仅我响应」模式\n\n你的 IM 标识: ${senderImId}\n只有你 @机器人 时才会响应，其他人的 @mention 将被静默忽略。\n\n发送 /require_mention false 可恢复为全量响应。`;
+}
+
+/**
+ * /claim 命令：认领当前群组的 bot owner 权限，开启发言者白名单模式。
+ * 首次认领后仅执行者本人可触发 bot，其他人需通过 /allow @成员 加入白名单。
+ * 已有 owner 时，只有 owner 本人可以重新认领。
+ */
+function handleClaimCommand(chatJid: string, senderImId?: string): string {
+  if (!senderImId) return '无法识别发送者身份';
+  const group = registeredGroups[chatJid] ?? getRegisteredGroup(chatJid);
+  if (!group) return '未找到当前会话';
+
+  if (group.owner_im_id && group.owner_im_id !== senderImId) {
+    return '该群组已有 bot owner，无法重新认领';
+  }
+  if (group.owner_im_id === senderImId) {
+    const count = group.sender_allowlist?.length ?? 0;
+    return `您已是该群组的 bot owner（白名单 ${count} 人）`;
+  }
+
+  const updated: RegisteredGroup = {
+    ...group,
+    owner_im_id: senderImId,
+    sender_allowlist: [senderImId],
+  };
+  setRegisteredGroup(chatJid, updated);
+  registeredGroups[chatJid] = updated;
+  logger.info({ chatJid, senderImId }, 'Bot owner claimed via /claim');
+
+  return `已认领 bot owner 权限。\n只有白名单中的成员才能触发我。\n\n/allow @成员 — 添加成员\n/disallow @成员 — 移除成员\n/allowlist — 查看白名单`;
+}
+
+/**
+ * /allow @成员 命令：将 @提及的成员加入发言者白名单（仅 owner 可操作）。
+ */
+function handleAllowCommand(
+  chatJid: string,
+  senderImId?: string,
+  mentions?: Array<{ key?: string; name?: string; id?: { open_id?: string } }>,
+): string {
+  if (!senderImId) return '无法识别发送者身份';
+  const group = registeredGroups[chatJid] ?? getRegisteredGroup(chatJid);
+  if (!group) return '未找到当前会话';
+
+  if (!group.owner_im_id) {
+    return '尚未设置 owner，请先运行 /claim 认领权限';
+  }
+  if (group.owner_im_id !== senderImId) {
+    return '只有 bot owner 才能修改白名单';
+  }
+
+  const toAdd = (mentions ?? [])
+    .map((m) => m.id?.open_id)
+    .filter((id): id is string => !!id && id !== senderImId);
+
+  if (toAdd.length === 0) {
+    return '请 @提及 要加入白名单的群成员：/allow @成员';
+  }
+
+  const current = group.sender_allowlist ?? [senderImId];
+  const newIds = toAdd.filter((id) => !current.includes(id));
+  if (newIds.length === 0) {
+    return '这些成员已在白名单中';
+  }
+
+  const updated: RegisteredGroup = {
+    ...group,
+    sender_allowlist: [...current, ...newIds],
+  };
+  setRegisteredGroup(chatJid, updated);
+  registeredGroups[chatJid] = updated;
+  logger.info({ chatJid, senderImId, added: newIds }, 'Members added to sender allowlist');
+
+  return `已将 ${newIds.length} 名成员加入白名单（当前共 ${updated.sender_allowlist!.length} 人）`;
+}
+
+/**
+ * /disallow @成员 命令：将 @提及的成员从发言者白名单移除（仅 owner 可操作）。
+ * owner 本人不能被移除。
+ */
+function handleDisallowCommand(
+  chatJid: string,
+  senderImId?: string,
+  mentions?: Array<{ key?: string; name?: string; id?: { open_id?: string } }>,
+): string {
+  if (!senderImId) return '无法识别发送者身份';
+  const group = registeredGroups[chatJid] ?? getRegisteredGroup(chatJid);
+  if (!group) return '未找到当前会话';
+
+  if (!group.owner_im_id || group.owner_im_id !== senderImId) {
+    return '只有 bot owner 才能修改白名单';
+  }
+  if (!group.sender_allowlist || group.sender_allowlist.length === 0) {
+    return '白名单为空';
+  }
+
+  const toRemove = (mentions ?? [])
+    .map((m) => m.id?.open_id)
+    .filter((id): id is string => !!id);
+
+  if (toRemove.length === 0) {
+    return '请 @提及 要从白名单移除的群成员：/disallow @成员';
+  }
+  if (toRemove.includes(senderImId)) {
+    return 'Owner 不能将自己移出白名单';
+  }
+
+  const updated_list = group.sender_allowlist.filter((id) => !toRemove.includes(id));
+  const updated: RegisteredGroup = { ...group, sender_allowlist: updated_list };
+  setRegisteredGroup(chatJid, updated);
+  registeredGroups[chatJid] = updated;
+  logger.info({ chatJid, senderImId, removed: toRemove }, 'Members removed from sender allowlist');
+
+  const removedCount = group.sender_allowlist.length - updated_list.length;
+  return `已将 ${removedCount} 名成员从白名单移除（当前共 ${updated_list.length} 人）`;
+}
+
+/**
+ * /allowlist 命令：查看当前群组的发言者白名单。
+ */
+function handleAllowlistCommand(chatJid: string): string {
+  const group = registeredGroups[chatJid] ?? getRegisteredGroup(chatJid);
+  if (!group) return '未找到当前会话';
+
+  const allowlist = group.sender_allowlist;
+  if (allowlist === undefined || allowlist === null) {
+    return '当前群组未启用白名单模式（所有人均可触发）\n运行 /claim 可启用白名单保护';
+  }
+  if (allowlist.length === 0) {
+    return `白名单模式已启用，当前无人可触发。\nOwner: ${group.owner_im_id ?? '未设置'}\n运行 /claim 认领 owner 权限后才能响应消息`;
+  }
+
+  const ownerMark = (id: string) => (id === group.owner_im_id ? ' (owner)' : '');
+  const lines = allowlist.map((id, i) => `${i + 1}. ${id}${ownerMark(id)}`);
+  return `白名单（${allowlist.length} 人）：\n${lines.join('\n')}`;
 }
 
 const recallCooldowns = new Map<string, number>();
@@ -6602,6 +6746,7 @@ function buildOnNewChat(
       folder: homeFolder,
       added_at: new Date().toISOString(),
       created_by: userId,
+      sender_allowlist: [], // new IM groups start locked; run /claim to take ownership
     });
     logger.info(
       { chatJid, chatName, userId, homeFolder },
@@ -6650,6 +6795,35 @@ function buildTelegramBotAddedHandler(
           'Failed to send Telegram group welcome message',
         ),
       );
+  };
+}
+
+/**
+ * Build the onBotAddedToGroup handler for Feishu connections.
+ * Registers the new group (locked by default) and sends a one-time welcome message.
+ */
+function buildFeishuBotAddedHandler(
+  userId: string,
+  homeFolder: string,
+): (chatJid: string, chatName: string) => void {
+  const onNewChat = buildOnNewChat(userId, homeFolder);
+  return (chatJid: string, chatName: string) => {
+    const isNew = !registeredGroups[chatJid] && !getRegisteredGroup(chatJid);
+    onNewChat(chatJid, chatName);
+    if (isNew) {
+      const welcome =
+        `已加入「${chatName}」。\n\n` +
+        `当前群聊已启用发言者白名单，仅 bot owner 可触发我。\n\n` +
+        `/claim — 认领 owner 权限（必须先认领才会响应消息）\n` +
+        `/allow @成员 — 将群成员加入白名单\n` +
+        `/disallow @成员 — 从白名单移除成员\n` +
+        `/allowlist — 查看白名单`;
+      imManager
+        .sendMessage(chatJid, welcome)
+        .catch((err) =>
+          logger.warn({ chatJid, err }, 'Failed to send Feishu group welcome message'),
+        );
+    }
   };
 }
 
@@ -7032,6 +7206,20 @@ function isGroupOwnerMessage(chatJid: string, senderImId?: string): boolean {
 }
 
 /**
+ * 群聊发言者白名单检查。
+ * sender_allowlist 为 null/undefined 时不限制（默认），为空数组时无人可触发，
+ * 为字符串数组时仅列表中的 open_id 可触发。
+ */
+function isSenderAllowedInGroup(chatJid: string, senderImId?: string): boolean {
+  const group = registeredGroups[chatJid] ?? getRegisteredGroup(chatJid);
+  if (!group) return false;
+  const allowlist = group.sender_allowlist;
+  if (allowlist === undefined || allowlist === null) return true;
+  if (!senderImId) return false;
+  return allowlist.includes(senderImId);
+}
+
+/**
  * 飞书流式卡片按钮中断回调。
  * 仅由飞书卡片按钮触发，不涉及自动关键词检测。
  */
@@ -7077,7 +7265,7 @@ async function connectUserIMChannels(
   };
   const resolveEffectiveChatJid = buildResolveEffectiveChatJid();
   const onAgentMessage = buildOnAgentMessage();
-  const onBotAddedToGroup = buildOnNewChat(userId, homeFolder); // reuse same logic: auto-register
+  const onBotAddedToGroup = buildFeishuBotAddedHandler(userId, homeFolder);
   const onBotRemovedFromGroup = buildOnBotRemovedFromGroup();
 
   // 各渠道互相独立，并发连接避免启动时延 N×M 累加
@@ -7096,6 +7284,7 @@ async function connectUserIMChannels(
           onBotRemovedFromGroup,
           shouldProcessGroupMessage,
           isGroupOwnerMessage,
+          isSenderAllowedInGroup,
           onCardInterrupt: handleCardInterrupt,
         })
       : Promise.resolve(false);
@@ -7532,10 +7721,11 @@ async function main(): Promise<void> {
         {
           ignoreMessagesBefore: Date.now(),
           onCommand: handleCommand,
-          onBotAddedToGroup: buildOnNewChat(adminUser.id, homeFolder),
+          onBotAddedToGroup: buildFeishuBotAddedHandler(adminUser.id, homeFolder),
           onBotRemovedFromGroup: buildOnBotRemovedFromGroup(),
           shouldProcessGroupMessage,
           isGroupOwnerMessage,
+          isSenderAllowedInGroup,
           onCardInterrupt: handleCardInterrupt,
         },
       );
@@ -7637,10 +7827,11 @@ async function main(): Promise<void> {
           {
             ignoreMessagesBefore,
             onCommand: handleCommand,
-            onBotAddedToGroup: buildOnNewChat(userId, homeFolder),
+            onBotAddedToGroup: buildFeishuBotAddedHandler(userId, homeFolder),
             onBotRemovedFromGroup: buildOnBotRemovedFromGroup(),
             shouldProcessGroupMessage,
             isGroupOwnerMessage,
+            isSenderAllowedInGroup,
             onCardInterrupt: handleCardInterrupt,
           },
         );

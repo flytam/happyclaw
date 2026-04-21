@@ -695,6 +695,7 @@ export function initDatabase(): void {
   );
   ensureColumn('registered_groups', 'feishu_chat_mode', 'TEXT');
   ensureColumn('registered_groups', 'feishu_group_message_type', 'TEXT');
+  ensureColumn('registered_groups', 'sender_allowlist', 'TEXT');
   ensureColumn('messages', 'token_usage', 'TEXT');
   ensureColumn('messages', 'turn_id', 'TEXT');
   ensureColumn('messages', 'session_id', 'TEXT');
@@ -1235,7 +1236,7 @@ export function initDatabase(): void {
     db.exec('ALTER TABLE agents ADD COLUMN spawned_from_jid TEXT');
   }
 
-  const SCHEMA_VERSION = '35';
+  const SCHEMA_VERSION = '36';
   db.prepare(
     'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
   ).run('schema_version', SCHEMA_VERSION);
@@ -2273,6 +2274,7 @@ type RegisteredGroupRow = {
   binding_mode: string | null;
   feishu_chat_mode: string | null;
   feishu_group_message_type: string | null;
+  sender_allowlist: string | null;
 };
 
 /** Convert a raw DB row into a RegisteredGroup domain object. */
@@ -2309,6 +2311,9 @@ function parseGroupRow(
       row.binding_mode === 'thread_map' ? 'thread_map' : 'single_context',
     feishu_chat_mode: row.feishu_chat_mode ?? undefined,
     feishu_group_message_type: row.feishu_group_message_type ?? undefined,
+    sender_allowlist: row.sender_allowlist != null
+      ? (JSON.parse(row.sender_allowlist) as string[])
+      : undefined,
   };
 }
 
@@ -2340,8 +2345,8 @@ export function getRegisteredGroup(
 
 export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, added_at, container_config, execution_mode, custom_cwd, init_source_path, init_git_url, created_by, is_home, selected_skills, target_agent_id, target_main_jid, reply_policy, require_mention, activation_mode, owner_im_id, mcp_mode, selected_mcps, conversation_source, conversation_nav_mode, binding_mode, feishu_chat_mode, feishu_group_message_type)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, added_at, container_config, execution_mode, custom_cwd, init_source_path, init_git_url, created_by, is_home, selected_skills, target_agent_id, target_main_jid, reply_policy, require_mention, activation_mode, owner_im_id, mcp_mode, selected_mcps, conversation_source, conversation_nav_mode, binding_mode, feishu_chat_mode, feishu_group_message_type, sender_allowlist)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -2368,6 +2373,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.binding_mode ?? 'single_context',
     group.feishu_chat_mode ?? null,
     group.feishu_group_message_type ?? null,
+    group.sender_allowlist != null ? JSON.stringify(group.sender_allowlist) : null,
   );
 }
 

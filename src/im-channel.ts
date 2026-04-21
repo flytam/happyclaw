@@ -88,6 +88,8 @@ export interface IMChannelConnectOpts {
   shouldProcessGroupMessage?: (chatJid: string, senderImId?: string) => boolean;
   /** owner_mentioned 模式下检查发送者是否为 owner */
   isGroupOwnerMessage?: (chatJid: string, senderImId?: string) => boolean;
+  /** 发言者白名单：返回 false 则丢弃（命令处理后、mention 门控前调用） */
+  isSenderAllowedInGroup?: (chatJid: string, senderImId?: string) => boolean;
   /** Resolve registered group for a jid */
   resolveRegisteredGroup?: (jid: string) => { activation_mode?: string } | undefined;
   /** 飞书流式卡片按钮中断回调 */
@@ -186,6 +188,7 @@ export function createFeishuChannel(config: FeishuConnectionConfig): IMChannel {
         onBotRemovedFromGroup: opts.onBotRemovedFromGroup,
         shouldProcessGroupMessage: opts.shouldProcessGroupMessage,
         isGroupOwnerMessage: opts.isGroupOwnerMessage,
+        isSenderAllowedInGroup: opts.isSenderAllowedInGroup,
         onCardInterrupt: opts.onCardInterrupt,
       });
       if (!connected) {
