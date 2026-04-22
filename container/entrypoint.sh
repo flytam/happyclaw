@@ -33,6 +33,13 @@ fi
 # 导致 "Native CLI binary for linux-x64 not found" 启动失败。
 export PATH="/app/node_modules/.bin:${PATH}"
 
+# SSH key setup: if .ssh is mounted (read-only), configure git to use it.
+# The mount is read-only so we can't chown; use GIT_SSH_COMMAND to bypass
+# OpenSSH's strict permission checks on the key file.
+if [ -d /home/node/.ssh ] && ls /home/node/.ssh/id_* >/dev/null 2>&1; then
+  export GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/home/node/.ssh/known_hosts -o IdentitiesOnly=yes"
+fi
+
 # CLAUDE_CONFIG_DIR: CLI 默认用 $HOME/.claude.json 作为身份文件，但该文件被
 # readonly 挂载（避免容器篡改宿主机配置）。CLI 启动时尝试写入（更新 numStartups
 # 等计数器），readonly 导致静默失败 → query() 返回 0 messages。
