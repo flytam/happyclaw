@@ -332,12 +332,22 @@ class MessageStream {
     }
 
     const rejectedReasons: string[] = [];
+    const originalImageCount = images?.length ?? 0;
     let filteredImages = images;
 
     if (filteredImages && filteredImages.length > 0) {
       const { valid, rejected } = filterOversizedImages(filteredImages);
       rejectedReasons.push(...rejected);
       filteredImages = valid.length > 0 ? valid : undefined;
+    }
+
+    // 全部图片被过滤 + text 为空时，替换为说明文本，避免 SDK 收到空 user message
+    // 进而让主模型回复"消息是空的"。典型触发：Web 用户直接粘贴长图（height > 8000px）无文字。
+    let effectiveText = text;
+    const allImagesDropped =
+      originalImageCount > 0 && (!filteredImages || filteredImages.length === 0);
+    if (allImagesDropped && !effectiveText.trim()) {
+      effectiveText = `[用户发送了 ${originalImageCount} 张图片，但因尺寸超出 API 限制（最大 ${IMAGE_MAX_DIMENSION}px）被跳过。请提示用户压缩或截取后重发。]`;
     }
 
     let content:
@@ -347,7 +357,7 @@ class MessageStream {
     if (filteredImages && filteredImages.length > 0) {
       // 多模态消息：text + images
       content = [
-        { type: 'text', text },
+        { type: 'text', text: effectiveText },
         ...filteredImages.map((img) => ({
           type: 'image' as const,
           source: {
@@ -359,7 +369,7 @@ class MessageStream {
       ];
     } else {
       // 纯文本消息
-      content = text;
+      content = effectiveText;
     }
 
     this.queue.push({

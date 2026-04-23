@@ -927,12 +927,29 @@ export function createFeishuConnection(
         }
       }
 
+      // 拼接图片标记：成功下载的用路径，失败的用占位符，确保 text 不为空。
+      // 否则长图/超大图片下载失败时会落入 agent 的空消息分支，回复"消息是空的"。
+      const failedCount = extracted.imageKeys.length - attachments.length;
+      const markers: string[] = [];
       if (attachments.length > 0) {
         attachmentsJson = JSON.stringify(attachments);
-        // 在 content 中添加图片标记 + 磁盘路径，与文件消息保持一致
-        // agent 可通过路径直接操作文件，无需从 DB 解码 base64
-        const pathHints = savedPaths.map((p) => `[图片: ${p}]`).join('\n');
-        const imgMarker = pathHints || '[图片]';
+        if (savedPaths.length > 0) {
+          markers.push(...savedPaths.map((p) => `[图片: ${p}]`));
+        } else {
+          markers.push('[图片]');
+        }
+      }
+      if (failedCount > 0) {
+        markers.push(
+          `[图片下载失败: ${failedCount} 张，可能超过飞书接口限制或网络异常]`,
+        );
+        logger.warn(
+          { chatJid, messageId, failedCount, totalKeys: extracted.imageKeys.length },
+          'Feishu image download failed for some or all images',
+        );
+      }
+      const imgMarker = markers.join('\n');
+      if (imgMarker) {
         text = text ? `${imgMarker}\n${text}` : imgMarker;
       }
     } else if (extracted.fileInfos && extracted.fileInfos.length > 0) {
