@@ -388,13 +388,15 @@ export const FeishuConfigSchema = z
     appSecret: z.string().max(2000).optional(),
     clearAppSecret: z.boolean().optional(),
     enabled: z.boolean().optional(),
+    autoIsolateContext: z.boolean().optional(),
   })
   .refine(
     (data) =>
       typeof data.appId === 'string' ||
       typeof data.appSecret === 'string' ||
       data.clearAppSecret === true ||
-      typeof data.enabled === 'boolean',
+      typeof data.enabled === 'boolean' ||
+      typeof data.autoIsolateContext === 'boolean',
     { message: 'At least one config field must be provided' },
   );
 
