@@ -50,6 +50,7 @@ export CLAUDE_CONFIG_DIR=/home/node/.claude
 # IS_SANDBOX: Claude Code 2.1.114+ 要求 IS_SANDBOX=1 才允许 --dangerously-skip-permissions。
 # 与宿主机模式的 hostEnv['IS_SANDBOX'] = '1' 保持一致。
 export IS_SANDBOX=1
+
 # Discover and link skills (builtin → project → user, higher priority overwrites)
 # Only remove entries that conflict with mounted skills (non-symlink with same name),
 # preserving any skills the agent created directly in .claude/skills/.
