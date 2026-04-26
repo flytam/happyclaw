@@ -6743,6 +6743,20 @@ function buildOnNewChat(
             }
           }
         }
+        const channelType = getChannelType(chatJid);
+        const isolationConfig = getUserContextIsolationConfig(
+          userId,
+          channelType,
+          { getUserFeishuConfig },
+        );
+        if (isolationConfig.enabled) {
+          ensureAutoImConversationBinding(
+            chatJid,
+            existing,
+            userId,
+            trimmed || existing.name || chatJid,
+          );
+        }
         return;
       }
 

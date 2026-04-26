@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 import {
   applyAutoIsolateContextForGroups,
+  clearTargetAgentBindingsForDeletedAgents,
   getUserContextIsolationConfig,
 } from '../src/im-context-isolation.js';
 import type { RegisteredGroup, SubAgent } from '../src/types.js';
@@ -114,5 +115,31 @@ describe('applyAutoIsolateContextForGroups', () => {
 
     expect(applyAutoIsolateContextForGroups('u1', false, deps)).toBe(0);
     expect(deleteAgent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('clearTargetAgentBindingsForDeletedAgents', () => {
+  test('clears only target_agent_id bindings for agents deleted by workspace rebuild', () => {
+    const groups: Record<string, RegisteredGroup> = {
+      'feishu:auto': makeGroup('Auto', { target_agent_id: 'old-auto' }),
+      'tg:manual': makeGroup('Manual', { target_agent_id: 'old-manual' }),
+      'qq:survivor': makeGroup('Survivor', { target_agent_id: 'still-alive' }),
+      'feishu:main': makeGroup('Main', { target_main_jid: 'web:home-u1' }),
+    };
+    const setGroup = vi.fn((jid: string, group: RegisteredGroup) => {
+      groups[jid] = group;
+    });
+
+    const count = clearTargetAgentBindingsForDeletedAgents(
+      groups,
+      new Set(['old-auto', 'old-manual']),
+      setGroup,
+    );
+
+    expect(count).toBe(2);
+    expect(groups['feishu:auto'].target_agent_id).toBeUndefined();
+    expect(groups['tg:manual'].target_agent_id).toBeUndefined();
+    expect(groups['qq:survivor'].target_agent_id).toBe('still-alive');
+    expect(groups['feishu:main'].target_main_jid).toBe('web:home-u1');
   });
 });
