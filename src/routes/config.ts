@@ -79,6 +79,10 @@ import {
   getUserDiscordConfig,
   saveUserDiscordConfig,
   updateAllSessionCredentials,
+  getSshKeyInfo,
+  saveSshKeyEncrypted,
+  decryptSshKeyToRuntime,
+  deleteSshKey,
 } from '../runtime-config.js';
 import type {
   ClaudeOAuthCredentials,
@@ -100,7 +104,6 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
-import { DATA_DIR } from '../config.js';
 
 const configRoutes = new Hono<{ Variables: Variables }>();
 
@@ -2746,39 +2749,11 @@ configRoutes.put('/user-im/bindings/:imJid', authMiddleware, async (c) => {
   );
 });
 
-// ─── SSH Key Management ────────────────────────────────────────────
+// ─── SSH Key Management (AES-256-GCM encrypted storage) ──────────────────
 // Per-user SSH keys for Docker containers to clone private repos via SSH.
+// Private keys are encrypted at rest; decrypted to a runtime dir only at mount time.
 
-const SSH_BASE_DIR = path.join(DATA_DIR, 'config', 'user-ssh');
 const execFileAsync = promisify(execFile);
-
-function getUserSshDir(userId: string): string {
-  return path.join(SSH_BASE_DIR, userId);
-}
-
-function findPrivateKeyFile(dir: string): string | null {
-  if (!fs.existsSync(dir)) return null;
-  for (const name of ['id_ed25519', 'id_rsa', 'id_ecdsa', 'id_dsa']) {
-    if (fs.existsSync(path.join(dir, name))) return name;
-  }
-  return null;
-}
-
-function detectKeyType(content: string): string {
-  if (content.includes('BEGIN OPENSSH PRIVATE KEY')) return 'openssh';
-  if (content.includes('BEGIN RSA PRIVATE KEY')) return 'rsa';
-  if (content.includes('BEGIN EC PRIVATE KEY')) return 'ecdsa';
-  if (content.includes('BEGIN DSA PRIVATE KEY')) return 'dsa';
-  return 'unknown';
-}
-
-function keyTypeToFilename(content: string): string {
-  const type = detectKeyType(content);
-  if (type === 'rsa') return 'id_rsa';
-  if (type === 'ecdsa') return 'id_ecdsa';
-  if (type === 'dsa') return 'id_dsa';
-  return 'id_ed25519';
-}
 
 async function getPublicKeyFingerprint(
   privateKeyPath: string,
@@ -2795,20 +2770,23 @@ async function getPublicKeyFingerprint(
   }
 }
 
-
 configRoutes.get('/user-ssh', authMiddleware, async (c) => {
   const user = c.get('user');
-  const dir = getUserSshDir(user.id);
-  const keyFile = findPrivateKeyFile(dir);
+  const info = getSshKeyInfo(user.id);
 
-  if (!keyFile) {
+  if (!info.configured) {
     return c.json({ configured: false });
   }
 
-  const fingerprint = await getPublicKeyFingerprint(path.join(dir, keyFile));
+  // Decrypt to runtime dir to extract fingerprint
+  const runtimeKeyPath = decryptSshKeyToRuntime(user.id);
+  const fingerprint = runtimeKeyPath
+    ? await getPublicKeyFingerprint(runtimeKeyPath)
+    : null;
+
   return c.json({
     configured: true,
-    keyType: keyFile.replace('id_', ''),
+    keyType: info.keyType,
     fingerprint,
   });
 });
@@ -2831,58 +2809,29 @@ configRoutes.put('/user-ssh', authMiddleware, async (c) => {
     return c.json({ error: '无效的 SSH 私钥格式，需要 PEM 格式的私钥' }, 400);
   }
 
-  const dir = getUserSshDir(user.id);
-  fs.mkdirSync(dir, { recursive: true });
+  const { keyType, runtimeKeyPath } = saveSshKeyEncrypted(user.id, privateKey);
 
-  // Remove any existing key files first
-  for (const name of ['id_ed25519', 'id_rsa', 'id_ecdsa', 'id_dsa']) {
-    const p = path.join(dir, name);
-    try { fs.unlinkSync(p); } catch { /* ok */ }
-    try { fs.unlinkSync(p + '.pub'); } catch { /* ok */ }
-  }
-
-  const filename = keyTypeToFilename(privateKey);
-  const keyPath = path.join(dir, filename);
-
-  // Ensure trailing newline (ssh-keygen requires it)
-  const content = privateKey.endsWith('\n') ? privateKey : privateKey + '\n';
-  fs.writeFileSync(keyPath, content, { mode: 0o600 });
-
-  // Generate public key from private key
+  // Generate public key from the runtime (decrypted) key file
   try {
-    await execFileAsync('ssh-keygen', ['-y', '-f', keyPath], { timeout: 5000 })
-      .then(({ stdout }) => {
-        fs.writeFileSync(keyPath + '.pub', stdout.trim() + '\n', { mode: 0o644 });
-      });
+    const { stdout } = await execFileAsync('ssh-keygen', ['-y', '-f', runtimeKeyPath], { timeout: 5000 });
+    fs.writeFileSync(runtimeKeyPath + '.pub', stdout.trim() + '\n', { mode: 0o644 });
   } catch {
     // Non-fatal: fingerprint just won't be available
   }
 
-  // Write SSH config to prefer this key
-  fs.writeFileSync(
-    path.join(dir, 'config'),
-    `Host *\n  IdentityFile ~/.ssh/${filename}\n  StrictHostKeyChecking accept-new\n`,
-    { mode: 0o644 },
-  );
-
-  const fingerprint = await getPublicKeyFingerprint(keyPath);
-  logger.info({ userId: user.id, keyType: filename }, 'SSH key saved');
+  const fingerprint = await getPublicKeyFingerprint(runtimeKeyPath);
+  logger.info({ userId: user.id, keyType }, 'SSH key saved (encrypted)');
 
   return c.json({
     configured: true,
-    keyType: filename.replace('id_', ''),
+    keyType,
     fingerprint,
   });
 });
 
 configRoutes.delete('/user-ssh', authMiddleware, (c) => {
   const user = c.get('user');
-  const dir = getUserSshDir(user.id);
-
-  if (fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-
+  deleteSshKey(user.id);
   logger.info({ userId: user.id }, 'SSH key deleted');
   return c.json({ configured: false });
 });

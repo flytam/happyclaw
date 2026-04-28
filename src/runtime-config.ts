@@ -3856,6 +3856,186 @@ export function saveSystemSettings(
   return merged;
 }
 
+// ─── SSH Key Encrypted Storage ──────────────────────────────────────────────
+
+const SSH_BASE_DIR = path.join(DATA_DIR, 'config', 'user-ssh');
+
+interface StoredSshKey {
+  version: 1;
+  keyType: string; // 'ed25519' | 'rsa' | 'ecdsa' | 'dsa'
+  secret: EncryptedSecrets;
+  updatedAt: string;
+}
+
+export interface SshKeyInfo {
+  configured: boolean;
+  keyType?: string;
+  fingerprint?: string | null;
+}
+
+function getUserSshDir(userId: string): string {
+  return path.join(SSH_BASE_DIR, userId);
+}
+
+function getUserSshRuntimeDir(userId: string): string {
+  return path.join(SSH_BASE_DIR, userId, 'runtime');
+}
+
+function detectSshKeyType(content: string): string {
+  if (content.includes('BEGIN RSA PRIVATE KEY')) return 'rsa';
+  if (content.includes('BEGIN EC PRIVATE KEY')) return 'ecdsa';
+  if (content.includes('BEGIN DSA PRIVATE KEY')) return 'dsa';
+  return 'ed25519';
+}
+
+function keyTypeToFilename(keyType: string): string {
+  return `id_${keyType}`;
+}
+
+/**
+ * Save SSH private key with AES-256-GCM encryption.
+ * Returns the runtime key path for fingerprint extraction.
+ */
+export function saveSshKeyEncrypted(
+  userId: string,
+  privateKey: string,
+): { keyType: string; runtimeKeyPath: string } {
+  const dir = getUserSshDir(userId);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const keyType = detectSshKeyType(privateKey);
+  const content = privateKey.endsWith('\n') ? privateKey : privateKey + '\n';
+
+  const stored: StoredSshKey = {
+    version: 1,
+    keyType,
+    secret: encryptChannelSecret<{ privateKey: string }>({ privateKey: content }),
+    updatedAt: new Date().toISOString(),
+  };
+
+  fs.writeFileSync(
+    path.join(dir, 'ssh-key.enc.json'),
+    JSON.stringify(stored, null, 2) + '\n',
+    { mode: 0o600 },
+  );
+
+  // Remove legacy plain-text key files
+  for (const name of ['id_ed25519', 'id_rsa', 'id_ecdsa', 'id_dsa']) {
+    try { fs.unlinkSync(path.join(dir, name)); } catch { /* ok */ }
+    try { fs.unlinkSync(path.join(dir, name + '.pub')); } catch { /* ok */ }
+  }
+  try { fs.unlinkSync(path.join(dir, 'config')); } catch { /* ok */ }
+
+  // Decrypt to runtime dir for ssh-keygen fingerprint extraction
+  const runtimeKeyPath = decryptSshKeyToRuntime(userId);
+  return { keyType, runtimeKeyPath: runtimeKeyPath! };
+}
+
+/**
+ * Read encrypted SSH key metadata (without decrypting the key itself).
+ */
+export function getSshKeyInfo(userId: string): { configured: boolean; keyType?: string } {
+  const dir = getUserSshDir(userId);
+  const encFile = path.join(dir, 'ssh-key.enc.json');
+
+  // Check encrypted storage first
+  try {
+    if (fs.existsSync(encFile)) {
+      const stored = JSON.parse(fs.readFileSync(encFile, 'utf-8')) as StoredSshKey;
+      if (stored.version === 1 && stored.secret) {
+        return { configured: true, keyType: stored.keyType };
+      }
+    }
+  } catch { /* fall through */ }
+
+  // Legacy: check plain-text key files and auto-migrate
+  for (const name of ['id_ed25519', 'id_rsa', 'id_ecdsa', 'id_dsa']) {
+    const keyPath = path.join(dir, name);
+    if (fs.existsSync(keyPath)) {
+      try {
+        const content = fs.readFileSync(keyPath, 'utf-8');
+        if (content.includes('PRIVATE KEY')) {
+          logger.info({ userId }, 'Migrating plain-text SSH key to encrypted storage');
+          saveSshKeyEncrypted(userId, content);
+          return { configured: true, keyType: name.replace('id_', '') };
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  return { configured: false };
+}
+
+/**
+ * Decrypt SSH key to a runtime directory for container mounting.
+ * Returns the path to the private key file, or null if no key configured.
+ */
+export function decryptSshKeyToRuntime(userId: string): string | null {
+  const dir = getUserSshDir(userId);
+  const encFile = path.join(dir, 'ssh-key.enc.json');
+
+  let privateKey: string;
+  let keyType: string;
+
+  try {
+    if (!fs.existsSync(encFile)) return null;
+    const stored = JSON.parse(fs.readFileSync(encFile, 'utf-8')) as StoredSshKey;
+    if (stored.version !== 1) return null;
+    const decrypted = decryptChannelSecret<{ privateKey: string }>(stored.secret);
+    privateKey = decrypted.privateKey;
+    keyType = stored.keyType;
+  } catch (err) {
+    logger.warn({ err, userId }, 'Failed to decrypt SSH key');
+    return null;
+  }
+
+  const runtimeDir = getUserSshRuntimeDir(userId);
+  fs.mkdirSync(runtimeDir, { recursive: true });
+
+  // Clean existing runtime files
+  for (const name of ['id_ed25519', 'id_rsa', 'id_ecdsa', 'id_dsa', 'config']) {
+    try { fs.unlinkSync(path.join(runtimeDir, name)); } catch { /* ok */ }
+    try { fs.unlinkSync(path.join(runtimeDir, name + '.pub')); } catch { /* ok */ }
+  }
+
+  const filename = keyTypeToFilename(keyType);
+  const keyPath = path.join(runtimeDir, filename);
+  fs.writeFileSync(keyPath, privateKey, { mode: 0o600 });
+
+  // SSH config
+  fs.writeFileSync(
+    path.join(runtimeDir, 'config'),
+    `Host *\n  IdentityFile ~/.ssh/${filename}\n  StrictHostKeyChecking accept-new\n`,
+    { mode: 0o644 },
+  );
+
+  // Fix permissions on the runtime dir (container node:1000 needs read access)
+  try { fs.chmodSync(runtimeDir, 0o755); } catch { /* ignore */ }
+
+  return keyPath;
+}
+
+/**
+ * Delete SSH key (both encrypted and runtime files).
+ */
+export function deleteSshKey(userId: string): void {
+  const dir = getUserSshDir(userId);
+  if (fs.existsSync(dir)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Get the runtime SSH directory path for container mounting.
+ * Returns null if no SSH key is configured for this user.
+ */
+export function getSshRuntimeDirForMount(userId: string): string | null {
+  const runtimeDir = getUserSshRuntimeDir(userId);
+  const keyPath = decryptSshKeyToRuntime(userId);
+  if (!keyPath) return null;
+  return runtimeDir;
+}
+
 // ─── OAuth Usage Types ─────────────────────────────────────────────────────
 
 export interface OAuthUsageBucket {

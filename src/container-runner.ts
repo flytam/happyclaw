@@ -31,6 +31,7 @@ import {
   resolveProviderById,
   shellQuoteEnvLines,
   writeCredentialsFile,
+  getSshRuntimeDirForMount,
 } from './runtime-config.js';
 import { providerPool } from './provider-pool.js';
 import { getSessionProviderId, setSessionProviderId } from './db.js';
@@ -534,14 +535,12 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Per-user SSH keys: mount user's SSH directory (read-only) for git clone via SSH
+  // Per-user SSH keys: decrypt from encrypted storage to runtime dir, mount read-only
   if (ownerId) {
-    const userSshDir = path.join(DATA_DIR, 'config', 'user-ssh', ownerId);
-    if (fs.existsSync(userSshDir) && fs.readdirSync(userSshDir).some(
-      (f) => f.startsWith('id_'),
-    )) {
+    const sshRuntimeDir = getSshRuntimeDirForMount(ownerId);
+    if (sshRuntimeDir) {
       mounts.push({
-        hostPath: userSshDir,
+        hostPath: sshRuntimeDir,
         containerPath: '/home/node/.ssh',
         readonly: true,
       });

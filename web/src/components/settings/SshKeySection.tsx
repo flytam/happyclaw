@@ -87,7 +87,7 @@ export function SshKeySection() {
   }
 
   return (
-    <Section icon={KeyRound} title="SSH 密钥" desc="用于 Docker 容器内 git clone 私有仓库">
+    <Section icon={KeyRound} title="SSH 密钥" desc="用于 Docker 容器内 git clone 私有仓库（AES-256-GCM 加密存储）">
       {status?.configured ? (
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
@@ -151,7 +151,7 @@ export function SshKeySection() {
           )}
 
           <p className="text-[11px] text-muted-foreground">
-            密钥以只读方式挂载到容器
+            密钥使用 AES-256-GCM 加密存储，以只读方式挂载到容器
           </p>
         </div>
       )}
