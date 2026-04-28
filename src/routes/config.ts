@@ -1354,12 +1354,14 @@ configRoutes.get('/user-im/feishu', authMiddleware, (c) => {
         updatedAt: null,
         connected,
         autoIsolateContext: false,
+        groupAllowAll: false,
       });
     }
     return c.json({
       ...toPublicFeishuProviderConfig(config, 'runtime'),
       connected,
       autoIsolateContext: config.autoIsolateContext ?? false,
+      groupAllowAll: config.groupAllowAll ?? false,
     });
   } catch (err) {
     logger.error({ err }, 'Failed to load user Feishu config');
@@ -1400,6 +1402,7 @@ configRoutes.put('/user-im/feishu', authMiddleware, async (c) => {
     enabled: current?.enabled ?? true,
     updatedAt: current?.updatedAt || null,
     autoIsolateContext: current?.autoIsolateContext ?? false,
+    groupAllowAll: current?.groupAllowAll ?? false,
   };
   if (typeof validation.data.appId === 'string') {
     const appId = validation.data.appId.trim();
@@ -1420,6 +1423,9 @@ configRoutes.put('/user-im/feishu', authMiddleware, async (c) => {
   if (typeof validation.data.autoIsolateContext === 'boolean') {
     next.autoIsolateContext = validation.data.autoIsolateContext;
   }
+  if (typeof validation.data.groupAllowAll === 'boolean') {
+    next.groupAllowAll = validation.data.groupAllowAll;
+  }
 
   try {
     const saved = saveUserFeishuConfig(user.id, {
@@ -1427,6 +1433,7 @@ configRoutes.put('/user-im/feishu', authMiddleware, async (c) => {
       appSecret: next.appSecret as string,
       enabled: next.enabled as boolean | undefined,
       autoIsolateContext: next.autoIsolateContext as boolean | undefined,
+      groupAllowAll: next.groupAllowAll as boolean | undefined,
     });
 
     // Migrate existing Feishu chats when autoIsolateContext toggle changes
@@ -1457,6 +1464,7 @@ configRoutes.put('/user-im/feishu', authMiddleware, async (c) => {
       ...toPublicFeishuProviderConfig(saved, 'runtime'),
       connected,
       autoIsolateContext: saved.autoIsolateContext ?? false,
+      groupAllowAll: saved.groupAllowAll ?? false,
     });
   } catch (err) {
     const message =

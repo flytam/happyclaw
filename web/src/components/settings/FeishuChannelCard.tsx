@@ -17,6 +17,7 @@ interface UserFeishuConfig {
   connected: boolean;
   updatedAt: string | null;
   autoIsolateContext?: boolean;
+  groupAllowAll?: boolean;
 }
 
 export function FeishuChannelCard() {
@@ -68,6 +69,19 @@ export function FeishuChannelCard() {
       toast.success(`自动隔离上下文已${newValue ? '开启' : '关闭'}`);
     } catch (err) {
       toast.error(getErrorMessage(err, '切换自动隔离上下文失败'));
+    } finally {
+      setToggling(false);
+    }
+  };
+
+  const handleGroupAllowAllToggle = async (newValue: boolean) => {
+    setToggling(true);
+    try {
+      const data = await api.put<UserFeishuConfig>('/api/config/user-im/feishu', { groupAllowAll: newValue });
+      setConfig(data);
+      toast.success(newValue ? '新群聊将允许所有人对话' : '新群聊将仅 owner 可触发');
+    } catch (err) {
+      toast.error(getErrorMessage(err, '切换白名单模式失败'));
     } finally {
       setToggling(false);
     }
@@ -168,6 +182,21 @@ export function FeishuChannelCard() {
                 checked={config?.autoIsolateContext ?? false}
                 disabled={toggling}
                 onCheckedChange={handleAutoIsolateToggle}
+              />
+            </div>
+            <div className="border-t border-border pt-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-foreground">允许所有人对话</p>
+                <p className="text-xs text-muted-foreground">
+                  {config?.groupAllowAll
+                    ? '新群聊中所有成员均可触发 Bot'
+                    : '新群聊默认仅 owner 可触发，需通过 /allow 添加白名单'}
+                </p>
+              </div>
+              <Switch
+                checked={config?.groupAllowAll ?? false}
+                disabled={toggling}
+                onCheckedChange={handleGroupAllowAllToggle}
               />
             </div>
           </>

@@ -232,6 +232,7 @@ interface StoredFeishuProviderConfigV1 {
   updatedAt: string;
   ownerOpenId?: string;
   autoIsolateContext?: boolean;
+  groupAllowAll?: boolean;
   secret: EncryptedSecrets;
 }
 
@@ -3035,6 +3036,7 @@ export interface UserFeishuConfig {
   updatedAt: string | null;
   ownerOpenId?: string; // auto-detected from first DM; used as sender_allowlist seed for new groups
   autoIsolateContext?: boolean; // auto-create isolated conversation for each new IM chat
+  groupAllowAll?: boolean; // true = new groups have no sender_allowlist (everyone can chat); false/undefined = owner-only allowlist (default)
 }
 
 export interface UserTelegramConfig {
@@ -3127,6 +3129,7 @@ export function getUserFeishuConfig(userId: string): UserFeishuConfig | null {
       updatedAt: stored.updatedAt || null,
       ownerOpenId: stored.ownerOpenId || undefined,
       autoIsolateContext: stored.autoIsolateContext ?? false,
+      groupAllowAll: stored.groupAllowAll ?? false,
     };
   } catch (err) {
     logger.warn({ err, userId }, 'Failed to read user Feishu config');
@@ -3145,6 +3148,7 @@ export function saveUserFeishuConfig(
     updatedAt: new Date().toISOString(),
     ownerOpenId: next.ownerOpenId,
     autoIsolateContext: next.autoIsolateContext,
+    groupAllowAll: next.groupAllowAll,
   };
 
   const payload: StoredFeishuProviderConfigV1 = {
@@ -3154,6 +3158,7 @@ export function saveUserFeishuConfig(
     updatedAt: normalized.updatedAt || new Date().toISOString(),
     ownerOpenId: normalized.ownerOpenId,
     autoIsolateContext: normalized.autoIsolateContext,
+    groupAllowAll: normalized.groupAllowAll,
     secret: encryptChannelSecret<FeishuSecretPayload>({
       appSecret: normalized.appSecret,
     }),

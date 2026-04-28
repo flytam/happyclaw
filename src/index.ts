@@ -6834,17 +6834,26 @@ function buildOnNewChat(
       return;
     }
     const ownerOpenId = getOwnerOpenId?.();
+    // Determine sender_allowlist for new group:
+    // - Non-Feishu channels (no getOwnerOpenId): no allowlist (unrestricted)
+    // - Feishu with groupAllowAll=true: no allowlist (everyone can chat)
+    // - Feishu default: owner-only allowlist
+    let senderAllowlist: string[] | undefined;
+    if (getOwnerOpenId) {
+      const feishuConfig = getUserFeishuConfig(userId);
+      if (feishuConfig?.groupAllowAll) {
+        senderAllowlist = undefined;
+      } else {
+        senderAllowlist = ownerOpenId ? [ownerOpenId] : [];
+      }
+    }
     registerGroup(chatJid, {
       name: chatName,
       folder: homeFolder,
       added_at: new Date().toISOString(),
       created_by: userId,
       owner_im_id: ownerOpenId,
-      // Only Feishu path (getOwnerOpenId provided) opts into the default
-      // allowlist lock. Other channels leave allowlist unrestricted.
-      sender_allowlist: getOwnerOpenId
-        ? (ownerOpenId ? [ownerOpenId] : [])
-        : undefined,
+      sender_allowlist: senderAllowlist,
     });
     logger.info(
       { chatJid, chatName, userId, homeFolder },
@@ -7030,16 +7039,26 @@ function buildFeishuBotAddedHandler(
     const isNew = !registeredGroups[chatJid] && !getRegisteredGroup(chatJid);
     onNewChat(chatJid, chatName);
     if (isNew) {
-      const ownerKnown = !!getOwnerOpenId?.();
-      const welcome =
-        `已加入「${chatName}」。\n\n` +
-        `当前群聊已启用发言者白名单，仅 bot owner 可触发我。\n` +
-        (ownerKnown
-          ? `Owner 已自动从私聊中识别。\n`
-          : `请先向机器人发一条私信，系统将自动识别您的 owner 身份。\n`) +
-        `\n/allow @成员 — 将群成员加入白名单\n` +
-        `/disallow @成员 — 从白名单移除成员\n` +
-        `/allowlist — 查看白名单`;
+      const feishuConfig = getUserFeishuConfig(userId);
+      const allowAll = feishuConfig?.groupAllowAll ?? false;
+      let welcome: string;
+      if (allowAll) {
+        welcome =
+          `已加入「${chatName}」。\n\n` +
+          `当前群聊允许所有人与我对话。\n` +
+          `可使用 /allow、/disallow 管理白名单。`;
+      } else {
+        const ownerKnown = !!getOwnerOpenId?.();
+        welcome =
+          `已加入「${chatName}」。\n\n` +
+          `当前群聊已启用发言者白名单，仅 bot owner 可触发我。\n` +
+          (ownerKnown
+            ? `Owner 已自动从私聊中识别。\n`
+            : `请先向机器人发一条私信，系统将自动识别您的 owner 身份。\n`) +
+          `\n/allow @成员 — 将群成员加入白名单\n` +
+          `/disallow @成员 — 从白名单移除成员\n` +
+          `/allowlist — 查看白名单`;
+      }
       imManager
         .sendMessage(chatJid, welcome)
         .catch((err) =>
