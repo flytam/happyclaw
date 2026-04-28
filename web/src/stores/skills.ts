@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api } from '../api/client';
+import { api, apiFetch } from '../api/client';
 
 export interface Skill {
   id: string;
@@ -43,6 +43,7 @@ interface SkillsState {
   loading: boolean;
   error: string | null;
   installing: boolean;
+  uploading: boolean;
   searching: boolean;
   searchResults: SearchResult[];
   searchDetails: Record<string, SearchResultDetail | null>;
@@ -53,6 +54,8 @@ interface SkillsState {
   deleteSkill: (id: string) => Promise<void>;
   installSkill: (pkg: string) => Promise<void>;
   reinstallSkill: (id: string) => Promise<void>;
+  uploadSkillZip: (file: File) => Promise<string[]>;
+  uploadSkillFolder: (files: File[]) => Promise<string[]>;
   deleteAllUserSkills: () => Promise<number>;
   getSkillDetail: (id: string) => Promise<SkillDetail>;
   searchSkills: (query: string) => Promise<void>;
@@ -64,6 +67,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   loading: false,
   error: null,
   installing: false,
+  uploading: false,
   searching: false,
   searchResults: [],
   searchDetails: {},
@@ -123,6 +127,51 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       throw err;
     } finally {
       set({ installing: false });
+    }
+  },
+
+  uploadSkillZip: async (file: File) => {
+    set({ uploading: true, error: null });
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const data = await apiFetch<{ success: boolean; installed: string[] }>(
+        '/api/skills/upload',
+        { method: 'POST', body: formData, headers: {}, timeoutMs: 120_000 },
+      );
+      await get().loadSkills();
+      return data.installed;
+    } catch (err: any) {
+      const msg = err?.message || '上传失败，请稍后重试';
+      set({ error: msg });
+      throw err;
+    } finally {
+      set({ uploading: false });
+    }
+  },
+
+  uploadSkillFolder: async (files: File[]) => {
+    set({ uploading: true, error: null });
+    try {
+      const formData = new FormData();
+      const paths: string[] = [];
+      for (const file of files) {
+        formData.append('files', file);
+        paths.push((file as any).webkitRelativePath || file.name);
+      }
+      formData.append('paths', JSON.stringify(paths));
+      const data = await apiFetch<{ success: boolean; installed: string[] }>(
+        '/api/skills/upload',
+        { method: 'POST', body: formData, headers: {}, timeoutMs: 120_000 },
+      );
+      await get().loadSkills();
+      return data.installed;
+    } catch (err: any) {
+      const msg = err?.message || '上传失败，请稍后重试';
+      set({ error: msg });
+      throw err;
+    } finally {
+      set({ uploading: false });
     }
   },
 

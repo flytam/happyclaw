@@ -11,6 +11,9 @@ import type { AuthUser } from '../types.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { DATA_DIR } from '../config.js';
 import { getEffectiveExternalDir } from '../runtime-config.js';
+import { getWebDeps } from '../web-context.js';
+import { getGroupsByOwner } from '../db.js';
+import { logger } from '../logger.js';
 import {
   parseFrontmatter,
   validateSkillId,
@@ -504,6 +507,134 @@ async function withSkillInstallLock<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * Scan an extracted directory for skill directories (containing SKILL.md),
+ * copy them to the user's skills dir, and return the list of installed skill IDs.
+ * Handles both flat layout (extractDir/skill-name/SKILL.md) and
+ * single-wrapper layout (extractDir/wrapper/skill-name/SKILL.md).
+ */
+function installFromExtractedDir(
+  extractDir: string,
+  userDir: string,
+  userId: string,
+): string[] {
+  const installed: string[] = [];
+
+  // Collect candidate dirs: immediate children that contain SKILL.md
+  const entries = fs.readdirSync(extractDir, { withFileTypes: true });
+  const skillDirs: Array<{ name: string; fullPath: string }> = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dirPath = path.join(extractDir, entry.name);
+    if (
+      fs.existsSync(path.join(dirPath, 'SKILL.md')) ||
+      fs.existsSync(path.join(dirPath, 'SKILL.md.disabled'))
+    ) {
+      skillDirs.push({ name: entry.name, fullPath: dirPath });
+    }
+  }
+
+  // If no direct children have SKILL.md, check if it's a single-wrapper case
+  // e.g. zip extracts to wrapper-dir/skill-name/SKILL.md
+  if (skillDirs.length === 0 && entries.length === 1 && entries[0].isDirectory()) {
+    const wrapperDir = path.join(extractDir, entries[0].name);
+    const innerEntries = fs.readdirSync(wrapperDir, { withFileTypes: true });
+    for (const inner of innerEntries) {
+      if (!inner.isDirectory()) continue;
+      const innerPath = path.join(wrapperDir, inner.name);
+      if (
+        fs.existsSync(path.join(innerPath, 'SKILL.md')) ||
+        fs.existsSync(path.join(innerPath, 'SKILL.md.disabled'))
+      ) {
+        skillDirs.push({ name: inner.name, fullPath: innerPath });
+      }
+    }
+
+    // Also check if the wrapper dir itself IS the skill
+    if (
+      skillDirs.length === 0 &&
+      (fs.existsSync(path.join(wrapperDir, 'SKILL.md')) ||
+        fs.existsSync(path.join(wrapperDir, 'SKILL.md.disabled')))
+    ) {
+      skillDirs.push({ name: entries[0].name, fullPath: wrapperDir });
+    }
+  }
+
+  // Also check if extractDir itself is the skill root (single skill, flat files)
+  if (
+    skillDirs.length === 0 &&
+    (fs.existsSync(path.join(extractDir, 'SKILL.md')) ||
+      fs.existsSync(path.join(extractDir, 'SKILL.md.disabled')))
+  ) {
+    // Derive a name from frontmatter or use "uploaded-skill"
+    const mdPath = fs.existsSync(path.join(extractDir, 'SKILL.md'))
+      ? path.join(extractDir, 'SKILL.md')
+      : path.join(extractDir, 'SKILL.md.disabled');
+    const content = fs.readFileSync(mdPath, 'utf-8');
+    const fm = parseFrontmatter(content);
+    const skillName = (fm.name || 'uploaded-skill').replace(/[^\w\-]/g, '-');
+    skillDirs.push({ name: skillName, fullPath: extractDir });
+  }
+
+  for (const { name, fullPath } of skillDirs) {
+    if (!validateSkillId(name)) continue;
+    const dest = path.join(userDir, name);
+    if (fs.existsSync(dest)) {
+      fs.rmSync(dest, { recursive: true, force: true });
+    }
+    fs.cpSync(fullPath, dest, { recursive: true });
+    installed.push(name);
+  }
+
+  if (installed.length > 0) {
+    updateSkillsManifest(userId, 'local-upload', installed);
+  }
+
+  return installed;
+}
+
+// Skill symlink refresh shell snippet (mirrors entrypoint.sh logic for /workspace/user-skills)
+const REFRESH_SYMLINKS_CMD = [
+  'sh', '-c',
+  'for skill in /workspace/user-skills/*/; do ' +
+    'if [ -d "$skill" ]; then ' +
+      'name=$(basename "$skill"); ' +
+      'target="/home/node/.claude/skills/$name"; ' +
+      'if [ -e "$target" ] && [ ! -L "$target" ]; then rm -rf "$target" 2>/dev/null || true; fi; ' +
+      'ln -sfn "$skill" "$target" 2>/dev/null || true; ' +
+    'fi; ' +
+  'done',
+];
+
+/**
+ * After skill install/upload/delete, refresh symlinks inside all Docker
+ * containers owned by this user so the new skill is visible immediately.
+ * Fire-and-forget — errors are logged but not propagated.
+ */
+function refreshSkillSymlinksForUser(userId: string): void {
+  const deps = getWebDeps();
+  if (!deps) return;
+
+  const groups = getGroupsByOwner(userId);
+  const folders = new Set(groups.map((g) => g.folder));
+  const containerNames = deps.queue.getActiveContainerNames(folders);
+  if (containerNames.length === 0) return;
+
+  for (const name of containerNames) {
+    execFile(
+      'docker',
+      ['exec', name, ...REFRESH_SYMLINKS_CMD],
+      { timeout: 10_000 },
+      (err) => {
+        if (err) {
+          logger.debug({ containerName: name, err }, 'Skill symlink refresh failed (container may have stopped)');
+        }
+      },
+    );
+  }
+}
+
 // --- Routes ---
 
 skillsRoutes.get('/', authMiddleware, (c) => {
@@ -806,10 +937,127 @@ async function installSkillForUser(
   }
 }
 
-/**
- * Sync host-level skills (~/.claude/skills/) to a user's directory.
- * Standalone function usable from both the API route and the auto-sync timer.
- */
+// Upload a skill from a local zip file or folder (multipart form).
+// Accepts:
+//   - A single .zip file (field: "file")
+//   - Multiple files with relative paths (field: "files" + "paths" JSON array)
+// The uploaded content must contain at least one directory with a SKILL.md.
+skillsRoutes.post('/upload', authMiddleware, async (c) => {
+  const authUser = c.get('user') as AuthUser;
+  const formData = await c.req.formData();
+
+  const userDir = getUserSkillsDir(authUser.id);
+  fs.mkdirSync(userDir, { recursive: true });
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-upload-'));
+
+  try {
+    const file = formData.get('file');
+    const filesRaw = formData.getAll('files');
+    const pathsRaw = formData.get('paths');
+
+    if (file instanceof File && file.name.endsWith('.zip')) {
+      // --- Zip upload ---
+      const zipPath = path.join(tempDir, 'upload.zip');
+      const buf = Buffer.from(await file.arrayBuffer());
+      if (buf.length > 50 * 1024 * 1024) {
+        return c.json({ error: 'Zip file exceeds 50MB limit' }, 400);
+      }
+      fs.writeFileSync(zipPath, buf);
+
+      const extractDir = path.join(tempDir, 'extracted');
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      try {
+        await execFileAsync('unzip', ['-o', '-q', zipPath, '-d', extractDir], {
+          timeout: 30_000,
+        });
+      } catch (err) {
+        return c.json(
+          {
+            error: 'Failed to extract zip',
+            details: err instanceof Error ? err.message : 'unzip command failed',
+          },
+          400,
+        );
+      }
+
+      // Remove __MACOSX if present
+      const macosxDir = path.join(extractDir, '__MACOSX');
+      if (fs.existsSync(macosxDir)) {
+        fs.rmSync(macosxDir, { recursive: true, force: true });
+      }
+
+      const installed = installFromExtractedDir(extractDir, userDir, authUser.id);
+      if (installed.length === 0) {
+        return c.json(
+          { error: '未找到包含 SKILL.md 的技能目录。请确保 zip 包含 skill-name/SKILL.md 结构。' },
+          400,
+        );
+      }
+
+      refreshSkillSymlinksForUser(authUser.id);
+      return c.json({ success: true, installed });
+    } else if (filesRaw.length > 0 && pathsRaw) {
+      // --- Folder upload (files + relative paths) ---
+      let relativePaths: string[];
+      try {
+        relativePaths = JSON.parse(pathsRaw as string);
+      } catch {
+        return c.json({ error: 'Invalid paths field' }, 400);
+      }
+
+      const files: File[] = [];
+      for (const f of filesRaw) {
+        if (f instanceof File) files.push(f);
+      }
+      if (files.length !== relativePaths.length) {
+        return c.json({ error: 'files and paths length mismatch' }, 400);
+      }
+
+      let totalSize = 0;
+      for (const f of files) totalSize += f.size;
+      if (totalSize > 50 * 1024 * 1024) {
+        return c.json({ error: 'Total upload size exceeds 50MB limit' }, 400);
+      }
+
+      const folderDir = path.join(tempDir, 'folder');
+      fs.mkdirSync(folderDir, { recursive: true });
+
+      for (let i = 0; i < files.length; i++) {
+        const relPath = relativePaths[i];
+        if (relPath.includes('..') || path.isAbsolute(relPath)) {
+          return c.json({ error: `Invalid path: ${relPath}` }, 400);
+        }
+        const destPath = path.join(folderDir, relPath);
+        fs.mkdirSync(path.dirname(destPath), { recursive: true });
+        const buf = Buffer.from(await files[i].arrayBuffer());
+        fs.writeFileSync(destPath, buf);
+      }
+
+      const installed = installFromExtractedDir(folderDir, userDir, authUser.id);
+      if (installed.length === 0) {
+        return c.json(
+          { error: '未找到包含 SKILL.md 的技能目录。请确保文件夹包含 skill-name/SKILL.md 结构。' },
+          400,
+        );
+      }
+
+      refreshSkillSymlinksForUser(authUser.id);
+      return c.json({ success: true, installed });
+    } else {
+      return c.json(
+        { error: '请上传 .zip 文件或文件夹' },
+        400,
+      );
+    }
+  } finally {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch { /* ignore */ }
+  }
+});
+
 skillsRoutes.post('/install', authMiddleware, async (c) => {
   const authUser = c.get('user') as AuthUser;
   const body = await c.req.json().catch(() => ({}));
@@ -828,6 +1076,7 @@ skillsRoutes.post('/install', authMiddleware, async (c) => {
     );
   }
 
+  refreshSkillSymlinksForUser(authUser.id);
   return c.json({ success: true, installed: result.installed });
 });
 
@@ -869,8 +1118,9 @@ skillsRoutes.post('/:id/reinstall', authMiddleware, async (c) => {
     );
   }
 
+  refreshSkillSymlinksForUser(authUser.id);
   return c.json({ success: true, installed: installResult.installed });
 });
 
-export { getUserSkillsDir, installSkillForUser, deleteSkillForUser };
+export { getUserSkillsDir, installSkillForUser, deleteSkillForUser, refreshSkillSymlinksForUser };
 export default skillsRoutes;

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Loader2, Search, ExternalLink, Download, ChevronDown, ChevronUp } from 'lucide-react';
+import { useState, useRef, useCallback } from 'react';
+import { Loader2, Search, ExternalLink, Download, ChevronDown, ChevronUp, Upload, FolderUp, FileArchive } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ interface InstallSkillDialogProps {
   installing: boolean;
 }
 
-type Tab = 'search' | 'manual';
+type Tab = 'search' | 'manual' | 'upload';
 
 function formatInstalls(n?: number): string {
   if (n === undefined || n === null) return '';
@@ -153,8 +153,12 @@ export function InstallSkillDialog({
   const [pkg, setPkg] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [installingPkg, setInstallingPkg] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
 
-  const { searching, searchResults, searchSkills } = useSkillsStore();
+  const zipInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+
+  const { searching, searchResults, searchSkills, uploading, uploadSkillZip, uploadSkillFolder } = useSkillsStore();
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,11 +196,48 @@ export function InstallSkillDialog({
     }
   };
 
+  const handleZipUpload = useCallback(async (file: File) => {
+    if (!file.name.endsWith('.zip')) {
+      toast.error('请选择 .zip 文件');
+      return;
+    }
+    try {
+      const installed = await uploadSkillZip(file);
+      toast.success(`已安装 ${installed.length} 个技能: ${installed.join(', ')}`);
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.message || '上传失败');
+    }
+  }, [uploadSkillZip, onClose]);
+
+  const handleFolderUpload = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
+    try {
+      const installed = await uploadSkillFolder(files);
+      toast.success(`已安装 ${installed.length} 个技能: ${installed.join(', ')}`);
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.message || '上传失败');
+    }
+  }, [uploadSkillFolder, onClose]);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const items = e.dataTransfer.files;
+    if (items.length === 1 && items[0].name.endsWith('.zip')) {
+      await handleZipUpload(items[0]);
+    } else {
+      toast.error('请拖拽一个 .zip 文件');
+    }
+  }, [handleZipUpload]);
+
   const handleClose = () => {
-    if (!installing) {
+    if (!installing && !uploading) {
       setPkg('');
       setSearchQuery('');
       setInstallingPkg(null);
+      setDragOver(false);
       onClose();
     }
   };
@@ -220,10 +261,23 @@ export function InstallSkillDialog({
                 : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
             onClick={() => { setTab('search'); }}
-            disabled={isInstalling}
+            disabled={isInstalling || uploading}
           >
             <Search className="size-3.5 inline-block mr-1.5 -mt-0.5" />
             搜索市场
+          </button>
+          <button
+            type="button"
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              tab === 'upload'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+            onClick={() => { setTab('upload'); }}
+            disabled={isInstalling || uploading}
+          >
+            <Upload className="size-3.5 inline-block mr-1.5 -mt-0.5" />
+            本地上传
           </button>
           <button
             type="button"
@@ -233,7 +287,7 @@ export function InstallSkillDialog({
                 : 'border-transparent text-muted-foreground hover:text-foreground'
             }`}
             onClick={() => { setTab('manual'); }}
-            disabled={isInstalling}
+            disabled={isInstalling || uploading}
           >
             手动安装
           </button>
@@ -291,6 +345,86 @@ export function InstallSkillDialog({
                 在 skills.sh 市场中搜索可用的技能包
               </p>
             )}
+          </div>
+        )}
+
+        {/* Upload Tab */}
+        {tab === 'upload' && (
+          <div className="space-y-4">
+            {/* Drop zone for zip */}
+            <div
+              className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
+                dragOver
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:border-muted-foreground/50'
+              } ${uploading ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => !uploading && zipInputRef.current?.click()}
+            >
+              {uploading ? (
+                <div className="flex flex-col items-center gap-2">
+                  <Loader2 className="size-8 text-primary animate-spin" />
+                  <p className="text-sm text-muted-foreground">正在上传并安装...</p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                  <FileArchive className="size-8 text-muted-foreground" />
+                  <p className="text-sm text-foreground font-medium">拖拽 .zip 文件到此处，或点击选择</p>
+                  <p className="text-xs text-muted-foreground">
+                    zip 内应包含 skill-name/SKILL.md 结构
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <input
+              ref={zipInputRef}
+              type="file"
+              accept=".zip"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleZipUpload(file);
+                e.target.value = '';
+              }}
+            />
+
+            {/* Folder upload */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 border-t border-border" />
+              <span className="text-xs text-muted-foreground">或</span>
+              <div className="flex-1 border-t border-border" />
+            </div>
+
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={uploading}
+              onClick={() => folderInputRef.current?.click()}
+            >
+              <FolderUp className="size-4 mr-2" />
+              选择文件夹上传
+            </Button>
+
+            <input
+              ref={folderInputRef}
+              type="file"
+              className="hidden"
+              {...{ webkitdirectory: '', directory: '' } as any}
+              onChange={(e) => {
+                const files = e.target.files;
+                if (files && files.length > 0) {
+                  handleFolderUpload(Array.from(files));
+                }
+                e.target.value = '';
+              }}
+            />
+
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              文件夹应包含 SKILL.md 文件。支持单技能目录或包含多个子技能的父目录。
+            </p>
           </div>
         )}
 

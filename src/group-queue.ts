@@ -1324,6 +1324,25 @@ export class GroupQueue {
     };
   }
 
+  /**
+   * Return container names for all active Docker containers whose groupFolder
+   * is in the given set. Used to refresh skill symlinks after install/upload.
+   */
+  getActiveContainerNames(groupFolders: Set<string>): string[] {
+    const names: string[] = [];
+    for (const state of this.groups.values()) {
+      if (
+        state.active &&
+        state.containerName &&
+        state.groupFolder &&
+        groupFolders.has(state.groupFolder)
+      ) {
+        names.push(state.containerName);
+      }
+    }
+    return names;
+  }
+
   async shutdown(gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 

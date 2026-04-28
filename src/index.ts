@@ -198,6 +198,7 @@ import {
 import {
   installSkillForUser,
   deleteSkillForUser,
+  refreshSkillSymlinksForUser,
 } from './routes/skills.js';
 import { verifyPairingCode } from './telegram-pairing.js';
 import { sdkQuery } from './sdk-query.js';
@@ -5199,6 +5200,9 @@ async function processTaskIpc(
           fs.mkdirSync(path.dirname(resultFilePath), { recursive: true });
           fs.writeFileSync(tmpPath, JSON.stringify(result));
           fs.renameSync(tmpPath, resultFilePath);
+          if (result.success) {
+            refreshSkillSymlinksForUser(userId);
+          }
           logger.info(
             { sourceGroup, userId, pkg, success: result.success },
             'Skill installation via IPC completed',
